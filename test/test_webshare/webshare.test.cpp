@@ -157,6 +157,12 @@ void test_home_when_wifi_is_up_ap_when_not() {
   TEST_ASSERT_FALSE(ws_pick_mode((app_webshare_mode_t)9, true, &m));
 }
 
+void test_stop_drops_only_the_wifi_the_page_joined() {
+  TEST_ASSERT_TRUE(ws_release_wifi_on_stop(APP_WEBSHARE_HOME, false)); // joined for the page: freed for ESP-NOW
+  TEST_ASSERT_FALSE(ws_release_wifi_on_stop(APP_WEBSHARE_HOME, true)); // the app's own net_up network stays
+  TEST_ASSERT_FALSE(ws_release_wifi_on_stop(APP_WEBSHARE_AP, false));  // the access point has its own teardown
+}
+
 static const uint32_t T4[4] = {1, 2, 3, 0xabcdef01};
 
 void test_login_token_works_once_then_needs_the_cookie() {
@@ -533,5 +539,6 @@ int main(int argc, char **argv) {
   RUN_TEST(test_zip_is_valid_for_any_chunk_size);
   RUN_TEST(test_zip_unreadable_file_is_an_error_not_a_short_zip);
   RUN_TEST(test_zip_refuses_too_many_or_long);
+  RUN_TEST(test_stop_drops_only_the_wifi_the_page_joined);
   return UNITY_END();
 }

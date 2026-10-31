@@ -20,6 +20,7 @@ struct webshare_state_t {
   bool files; // the files profile (API 2.3)
   bool settings; // the settings profile (API 2.6); none of these: the writer's
   bool watch_alive;
+  bool connected_before; // the X was on a network before the page started (then stop leaves it on)
   app_webshare_mode_t mode;
   ws_auth_t auth;
   uint32_t last_request;

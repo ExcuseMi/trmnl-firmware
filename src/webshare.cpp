@@ -427,6 +427,10 @@ static void stop_locked() {
     WiFi.mode(WIFI_STA);
   } else {
     MDNS.end();
+    if (ws_release_wifi_on_stop(S.mode, S.connected_before)) {
+      WiFi.disconnect(true);
+      WiFi.mode(WIFI_OFF);
+    }
   }
   Log_info("webshare: off");
   evlog_add("webshare: off");
@@ -520,6 +524,7 @@ int webshare_start_profile(app_webshare_mode_t requested, int profile) {
   if (!S.lock) return APP_ENOMEM;
   webshare_stop(); // a new start is a new code
   app_webshare_mode_t mode;
+  bool connected_before = WiFi.status() == WL_CONNECTED;
   bool wifi_up = requested == APP_WEBSHARE_AP ? false : app_host_net_up();
   if (!ws_pick_mode(requested, wifi_up, &mode)) return APP_ENONET;
   if (mode == APP_WEBSHARE_AP) Log_info("webshare: no home network, using the access point");
@@ -543,6 +548,7 @@ int webshare_start_profile(app_webshare_mode_t requested, int profile) {
   uint32_t tok[4] = {esp_random(), esp_random(), esp_random(), esp_random()};
   ws_auth_new_token(&S.auth, tok, millis());
   S.mode = mode;
+  S.connected_before = connected_before;
   S.last_request = millis();
   S.network[0] = '\0';
   upload_owner = nullptr;

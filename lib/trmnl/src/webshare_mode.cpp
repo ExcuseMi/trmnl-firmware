@@ -14,3 +14,7 @@ bool ws_pick_mode(app_webshare_mode_t requested, bool home_wifi_up, app_webshare
   }
   return false;
 }
+
+bool ws_release_wifi_on_stop(app_webshare_mode_t mode, bool connected_before_start) {
+  return mode == APP_WEBSHARE_HOME && !connected_before_start;
+}
