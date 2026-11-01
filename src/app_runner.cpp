@@ -8,6 +8,7 @@
 #include <app_install.h>
 #include <app_keys.h>
 #include <app_path.h>
+#include <app_launch.h>
 #include <app_resume.h>
 #include <app_serial.h>
 #include <app_sleep_gate.h>
@@ -275,8 +276,12 @@ static bool app_supervise(PreferencesPersistence &persistence) {
   return true;
 }
 
-void apps_run(const char *path) {
+// Runs one app; true when it returned by itself and asked for another app (API 2.9): `next` and `next_arg` are set
+static bool apps_run_once(const char *path, const char *arg, char *next, size_t next_len, char *next_arg,
+                          size_t next_arg_len) {
   PreferencesPersistence persistence(preferences);
+  app_host_clear_launch(); // a launch of an app that did not return by itself never counts
+  app_host_set_arg(arg); // "" after a menu start or a resume: a restart never brings back an old argument
   memset(&app_host, 0, sizeof(app_host));
   if (!app_path_name(path, app_host.name, sizeof(app_host.name))) {
     app_resume_ended(persistence);
@@ -362,7 +367,12 @@ void apps_run(const char *path) {
     app_error_and_sleep(app_host.name, with_restore_note(persistence, what));
   }
   app_install_started(persistence, webshare_fs_root(), app_host.name); // it ran and ended well: no .bak needed
+  if (!app_exit_asked && app_host_take_launch(next, next_len, next_arg, next_arg_len)) {
+    Log_event("Apps: %s ended, starting %s next", app_host.name, next);
+    return true;
+  }
   show_last_image_and_sleep();
+  return false;
 }
 
 // ---- Install via Wi-Fi ----
@@ -485,6 +495,14 @@ void apps_install_session(void) {
   app_sleep_gate_screen(nullptr);
   webshare_stop();
   show_last_image_and_sleep();
+}
+
+void apps_run(const char *path) {
+  char next[APPS_PATH_MAX], next_app[32], arg[APP_LAUNCH_ARG_MAX + 1] = "";
+  while (apps_run_once(path, arg, next_app, sizeof(next_app), arg, sizeof(arg))) {
+    snprintf(next, sizeof(next), APPS_DIR "/%s.elf", next_app);
+    path = next;
+  }
 }
 
 void apps_resume_if_due(void) {

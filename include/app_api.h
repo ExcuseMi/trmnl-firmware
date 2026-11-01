@@ -23,10 +23,10 @@ extern "C" {
 
 #define APP_API_VERSION 2 // 2: keyboards, USB drive, Wi-Fi page (docs/apps.md "API 2")
 // Calls added to a version without a new one: an app checks api->size >= APP_API_SLOT(n + 1) before call n
-#define APP_API_MINOR 8 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
+#define APP_API_MINOR 9 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
                         // 2.4: ESP-NOW receive, touch hold; 2.5: orientation from the accelerometer;
                         // 2.6: keyboard layout, settings form; 2.7: USB pen tablet;
-                        // 2.8: other apps' files, read only
+                        // 2.8: other apps' files, read only; 2.9: app_launch, app_arg
 
 // ---- app header ----
 
@@ -569,6 +569,16 @@ typedef struct app_api {
   // Opens `path` of the app `app` for reading. Use file_read, file_seek and file_close; file_write on the handle
   // returns APP_EPERM. NULL: bad name or path, no such file, too many open
   app_file_t *(*file_open_app)(const char *app, const char *path);
+
+  // ---- API 2.9 (api->size >= APP_API_SLOT(55)): one app starts another ----
+
+  // Records that the app `app` (a name in /apps) starts next, with the string `arg` (up to 128 bytes), when this app
+  // returns from app_main. Nothing starts at once; a second call replaces the first. 0, APP_EINVAL (bad name, arg NULL
+  // or over 128 bytes) or APP_ENOENT (no such app). The launch is lost if the app is ended by a long press or fails
+  int (*app_launch)(const char *app, const char *arg);
+  // Copies the start argument of this app to `out` (cut to n - 1 bytes) and returns its full length: "" (0) when it was
+  // started from the menu or resumed after a restart. APP_EINVAL (out NULL or n 0)
+  int (*app_arg)(char *out, size_t n);
 } app_api_t;
 
 #define APP_ORIENT_SETTLE_MS 1000
@@ -604,7 +614,8 @@ APP_API_ASSERT(offsetof(app_api_t, device_orientation) == APP_API_SLOT(41), "API
 APP_API_ASSERT(offsetof(app_api_t, keyboard_layout_name) == APP_API_SLOT(44), "API 2.6: layout after touchbar_layout");
 APP_API_ASSERT(offsetof(app_api_t, pen_enable) == APP_API_SLOT(48), "API 2.7: the pen after keyboard_chars");
 APP_API_ASSERT(offsetof(app_api_t, file_list_apps) == APP_API_SLOT(50), "API 2.8: other apps' files after the pen");
-APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(53), "API 2.8 has 53 calls: a new one raises APP_API_MINOR");
+APP_API_ASSERT(offsetof(app_api_t, app_launch) == APP_API_SLOT(53), "API 2.9: launching after other apps' files");
+APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(55), "API 2.9 has 55 calls: a new one raises APP_API_MINOR");
 APP_API_ASSERT(sizeof(app_pen_event_t) == sizeof(app_event_t), "a pen event fills an app_event_t");
 APP_API_ASSERT(offsetof(app_pen_event_t, x) == 2 && offsetof(app_pen_event_t, tilt_x) == 8 &&
                    offsetof(app_pen_event_t, changed) == 11, "app_pen_event_t is part of the app ABI");
@@ -614,6 +625,6 @@ APP_API_ASSERT(sizeof(app_espnow_pkt_t) == 258, "app_espnow_pkt_t is part of the
 APP_API_ASSERT(sizeof(app_local_time_t) == 16, "app_local_time_t is part of the app ABI");
 APP_API_ASSERT(sizeof(app_setting_decl_t) == 3 * sizeof(void *) + 12 + (sizeof(void *) == 8 ? 4 : 0),
                "app_setting_decl_t is part of the app ABI");
-APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 8, "a new version adds its own size check above");
+APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 9, "a new version adds its own size check above");
 
 #endif // APP_API_H

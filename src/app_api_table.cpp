@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <WifiCaptive.h>
 #include <app_clock.h>
+#include <app_launch.h>
 #include <app_orientation.h>
 #include <app_path.h>
 #include <apps.h>
@@ -312,6 +313,33 @@ static app_file_t *file_open_app(const char *app, const char *path) {
   }
   return nullptr; // too many open
 }
+
+// ---- API 2.9: one app starts another ----
+
+static app_launch_t launch_next; // RAM only: a restart forgets it
+static char launch_arg[APP_LAUNCH_ARG_MAX + 1]; // the running app's start argument
+
+static int app_launch_call(const char *app, const char *arg) {
+  char elf[APP_PATH_MAX + 32];
+  bool exists = false;
+  if (app && app_path_app_ok(app)) {
+    snprintf(elf, sizeof(elf), APPS_DIR "/%s.elf", app);
+    exists = LittleFS.exists(elf);
+  }
+  int rc = app_launch_set(&launch_next, app, arg, exists);
+  Log_event("Apps: %s asks to start %s (%d)", app_host.name, app ? app : "?", rc);
+  return rc;
+}
+
+static int app_arg_call(char *out, size_t n) { return app_arg_copy(launch_arg, out, n); }
+
+void app_host_set_arg(const char *arg) { snprintf(launch_arg, sizeof(launch_arg), "%s", arg ? arg : ""); }
+
+bool app_host_take_launch(char *app, size_t app_len, char *arg, size_t arg_len) {
+  return app_launch_take(&launch_next, app, app_len, arg, arg_len);
+}
+
+void app_host_clear_launch(void) { launch_next.pending = false; }
 
 static int file_rename(const char *from, const char *to) {
   char a[APP_PATH_MAX + 64], b[APP_PATH_MAX + 64];
@@ -627,6 +655,7 @@ static const app_api_t table = {
     pen_enable, usb_pen_x_info,
     file_list_apps,  file_list_app,
     file_open_app,
+    app_launch_call, app_arg_call,
 };
 
 const app_api_t *app_api_table(void) {

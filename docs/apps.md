@@ -36,6 +36,7 @@ The firmware calls `int app_main(const app_api_t *api)`. Return 0 when done, any
 | settings form (API 2.6) | `settings_declare(decls, n)`, `webshare_start_settings(mode)`, `APP_EVENT_SETTINGS`: the app's settings typed on the phone, see "Settings profile" below. Check `api->size >= APP_API_SLOT(47)` first |
 | pen tablet (API 2.7) | `pen_enable(1)`, `pen_info(&info)`, `APP_EVENT_PEN`, `APP_EVENT_PEN_KEY`: a USB pen tablet, see "Pen tablet" below. Check `api->size >= APP_API_SLOT(50)` first |
 | other apps' files (API 2.8) | `file_list_apps(cb, ctx)`, `file_list_app(app, dir, cb, ctx)` (callback also gets the modification time), `file_open_app(app, path)`: read only, see "Other apps' files" below. Check `api->size >= APP_API_SLOT(53)` first |
+| launching an app (API 2.9) | `app_launch(app, arg)`, `app_arg(out, n)`: see "Launching an app" below. Check `api->size >= APP_API_SLOT(55)` first |
 
 Errors are negative `APP_E*` values.
 
@@ -226,6 +227,18 @@ For the Print app: list and read what other apps keep. Rules in `lib/trmnl/src/a
 | Paths | the `file_open` rules (no `..`, no leading slash, no empty or `.` part, no backslash) under `/appdata/<app>/`; an app name with `/`, `.` or other characters is refused, so nothing outside `/appdata` is reachable |
 | Secrets | `setting_*` values live in NVS (namespace per app), not under `/appdata`: this API cannot read them. Files an app writes itself are readable by every app |
 | Old firmware | `api->size < APP_API_SLOT(53)`: the calls are not there |
+
+## Launching an app (API 2.9)
+
+An app hands over to another one (Sketch to Print and back). Rules in `lib/trmnl/src/app_launch.cpp` (test `test_app_launch`), glue in `src/app_api_table.cpp` and `apps_run` in `src/app_runner.cpp`.
+
+| Call | Rule |
+|---|---|
+| `app_launch(app, arg)` | records that `app` (a valid name with `/apps/<app>.elf`) starts next with `arg` (a string, at most 128 bytes) once this app returns from `app_main`. Nothing starts at once; a second call replaces the first. 0, `APP_EINVAL` (bad name, NULL, argument too long) or `APP_ENOENT`. Event log: `Apps: <app> asks to start <next> (rc)` |
+| `app_arg(out, n)` | the start argument, cut to `n - 1` bytes; returns its full length. `""` (0) after a menu start |
+| Lost | a launch is dropped when the app ends by a long press, by an error or by a crash; then TRMNL shows its image as always |
+| Resume after a restart | the argument and the launch live in RAM only: a restart resumes the running app (`app_last`) with `""`, never an old argument. An app must open sensibly without an argument |
+| Chain | the runner loops (no recursion), so apps may hand over back and forth |
 
 ## ESP-NOW (API 2.4)
 

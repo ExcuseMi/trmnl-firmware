@@ -43,3 +43,8 @@ bool app_host_net_up(void);
 int app_host_setting_get(const char *key, void *buf, size_t len);
 int app_host_setting_set(const char *key, const void *buf, size_t len);
 int app_host_setting_remove(const char *key);
+
+// API 2.9: the running app's start argument; the launch it asked for (taken once by the runner after it returned 0)
+void app_host_set_arg(const char *arg);
+bool app_host_take_launch(char *app, size_t app_len, char *arg, size_t arg_len);
+void app_host_clear_launch(void);
