@@ -51,3 +51,10 @@ bool usb_probe_summary(usb_probe_t *p, uint32_t now, uint32_t *count) {
   *count = t;
   return true;
 }
+
+uint16_t usb_probe_max_ma(uint8_t bMaxPower) { return (uint16_t)(bMaxPower * 2u); }
+
+int usb_probe_hub_ports(const uint8_t *d, size_t len) {
+  if (!d || len < 7 || d[0] < 7 || d[0] > len || d[1] != 0x29) return -1; // 7: the hub descriptor's fixed part
+  return d[2];
+}

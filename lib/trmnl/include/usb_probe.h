@@ -39,3 +39,11 @@ bool usb_probe_report_upto(usb_probe_t *p, uint32_t first);
 // Polled: true when a count line is due (past the full ones, new reports, USB_PROBE_SUMMARY_MS since the last);
 // `*count` is the total
 bool usb_probe_summary(usb_probe_t *p, uint32_t now, uint32_t *count);
+
+// ---- a device's power and a hub's ports (src/usb_dev_log.cpp logs them when a device enumerates) ----
+
+// A configuration's bMaxPower (2 mA units at full speed) in mA
+uint16_t usb_probe_max_ma(uint8_t bMaxPower);
+
+// A hub class descriptor (bDescriptorType 0x29) of `len` bytes: its bNbrPorts; -1 when `d` is not a whole one
+int usb_probe_hub_ports(const uint8_t *d, size_t len);

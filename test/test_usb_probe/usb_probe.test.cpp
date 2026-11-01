@@ -90,6 +90,24 @@ void test_report_upto_logs_the_first_ones_counts_all() {
   TEST_ASSERT_EQUAL_UINT32(100, p.total);
 }
 
+void test_max_power_in_milliamps() {
+  TEST_ASSERT_EQUAL_UINT16(100, usb_probe_max_ma(50));
+  TEST_ASSERT_EQUAL_UINT16(500, usb_probe_max_ma(250));
+  TEST_ASSERT_EQUAL_UINT16(510, usb_probe_max_ma(255));
+  TEST_ASSERT_EQUAL_UINT16(0, usb_probe_max_ma(0));
+}
+
+void test_hub_ports_from_a_whole_hub_descriptor_only() {
+  const uint8_t hub4[] = {9, 0x29, 4, 0xe0, 0x00, 0x32, 0x64, 0x00, 0xff};
+  TEST_ASSERT_EQUAL(4, usb_probe_hub_ports(hub4, sizeof(hub4)));
+  TEST_ASSERT_EQUAL(-1, usb_probe_hub_ports(hub4, 6)); // short read
+  const uint8_t dev[] = {18, 0x01, 0x00, 0x02, 0x09, 0x00, 0x01, 0x40, 0x28, 0x6b, 0x01, 0x09, 0, 1, 1, 2, 0, 1};
+  TEST_ASSERT_EQUAL(-1, usb_probe_hub_ports(dev, sizeof(dev))); // a device descriptor, not a hub's
+  const uint8_t lies[] = {12, 0x29, 4, 0, 0, 0, 0}; // says 12 bytes, 7 read
+  TEST_ASSERT_EQUAL(-1, usb_probe_hub_ports(lies, sizeof(lies)));
+  TEST_ASSERT_EQUAL(-1, usb_probe_hub_ports(nullptr, 9));
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_report_upto_logs_the_first_ones_counts_all);
@@ -98,5 +116,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_descriptor_lines_cover_it_once_and_are_bounded);
   RUN_TEST(test_first_reports_in_full_then_counted_every_two_seconds);
   RUN_TEST(test_counter_does_not_wrap);
+  RUN_TEST(test_max_power_in_milliamps);
+  RUN_TEST(test_hub_ports_from_a_whole_hub_descriptor_only);
   return UNITY_END();
 }
