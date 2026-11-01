@@ -16,6 +16,7 @@
 #include "app_host.h"
 #include "evlog.h"
 #include "keyboards.h"
+#include "usb_dev_log.h"
 #include "usb_pen_x.h"
 #include "usb_port_role.h"
 
@@ -157,6 +158,7 @@ static bool host_start(void) {
     usb_port_give(USB_ROLE_HOST);
     return false;
   }
+  usb_dev_log_start(); // before any device enumerates (the root port's debounce is 250 ms)
   hid_host_driver_config_t dc = {};
   dc.create_background_task = true;
   dc.task_priority = 5;
@@ -194,6 +196,7 @@ static bool host_stop(uint32_t deadline) {
     if ((int32_t)(millis() - deadline) >= 0) return false;
     delay(20);
   }
+  usb_dev_log_stop(); // every client off before the library's uninstall
   lib_stop = true;
   while (lib_task) {
     if ((int32_t)(millis() - deadline) >= 0) return false;
@@ -364,29 +367,40 @@ static void port_loop(void *arg) {
   usb_boost_t bst;
   usb_boost_init(&bst, millis());
   bst.on = true; // device mode: nothing to switch on
+  usb_power_t last_power = USB_POWER_UNKNOWN;
   while (true) {
     hid_host_device_handle_t h;
     if (xQueueReceive(conn_q, &h, pdMS_TO_TICKS(USB_PORT_POLL_MS)) == pdTRUE && applied == USB_PORT_HOST) {
       open_interface(h);
     }
     drain_reports();
+    if (applied == USB_PORT_HOST) {
+      char vbus[48];
+      snprintf(vbus, sizeof(vbus), "boost %s, input power %s", bst.on && port.boost ? "on" : "off",
+               last_power == USB_POWER_YES ? "yes" : last_power == USB_POWER_NO ? "no" : "unknown");
+      usb_dev_log_poll(vbus);
+    }
     if (keyboard_open != was_open) {
       was_open = keyboard_open;
       if (was_open) keyboards_post_change();
     }
-    usb_port_input_t in = {(wanted || pen_wanted) && !stop_task, read_power(),
+    last_power = read_power();
+    usb_port_input_t in = {(wanted || pen_wanted) && !stop_task, last_power,
                            keyboard_open || (pen_wanted && pen_open()), usb_port_role() == USB_ROLE_DRIVE};
     usb_port_mode_t mode = usb_port_step(&port, millis(), &in);
     if (port.why != why) {
       why = port.why;
       Log_info("USB keys: %s", usb_port_why_str(why));
-      // not every probe (one per retry_ms without a keyboard): only an unreadable charger, the rare one
-      if (why == USB_WHY_POWER_UNKNOWN) evlog_add("USB keys: %s", usb_port_why_str(why));
+      // not every probe (one per retry_ms without a keyboard): an unreadable charger and the outside power steps
+      if (why == USB_WHY_POWER_UNKNOWN || why == USB_WHY_OUTSIDE_PROBING || why == USB_WHY_OUTSIDE_DEVICE ||
+          why == USB_WHY_OUTSIDE_NONE)
+        evlog_add("USB keys: %s", usb_port_why_str(why));
     }
     if (mode == USB_PORT_HOST && applied == USB_PORT_DEVICE) {
       if (host_start()) {
         applied = USB_PORT_HOST;
         usb_boost_init(&bst, millis());
+        bst.on = !port.boost; // outside power: the boost stays off, nothing to switch on (usb_port.h)
       }
     } else if (mode == USB_PORT_DEVICE && applied == USB_PORT_HOST) {
       if (was_open) evlog_add("USB keys: host mode dropped with a keyboard on: %s", usb_port_why_str(why));
@@ -411,7 +425,7 @@ static void port_loop(void *arg) {
       }
       applied = USB_PORT_DEVICE;
     }
-    if (applied == USB_PORT_HOST && usb_boost_due(&bst, millis())) { // retried while off (usb_port.h)
+    if (applied == USB_PORT_HOST && port.boost && usb_boost_due(&bst, millis())) { // retried while off (usb_port.h)
       usb_boost_log_t l = usb_boost_result(&bst, millis(), boost(true, 200));
       if (l == USB_BOOST_LOG_FAILED) {
         Log_error("USB keys: boost not switched on (expander busy), trying every %d ms", USB_BOOST_SLOW_MS);
