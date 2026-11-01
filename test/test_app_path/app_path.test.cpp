@@ -1,3 +1,4 @@
+#include <app_api.h>
 #include <app_path.h>
 #include <string.h>
 #include <unity.h>
@@ -50,6 +51,45 @@ void test_app_name_from_elf_path() {
   TEST_ASSERT_FALSE(app_path_name("/apps/aaaaaaaaaaaaaaaaaaaaaaaaa.elf", name, sizeof(name)));
 }
 
+static bool join_app(const char *app, const char *rel) {
+  return app_path_join_app("/appdata", app, rel, out, sizeof(out));
+}
+
+void test_other_app_file_is_readable_by_path() {
+  TEST_ASSERT_TRUE(join_app("print", "documents/a.txt"));
+  TEST_ASSERT_EQUAL_STRING("/appdata/print/documents/a.txt", out);
+  TEST_ASSERT_TRUE(join_app("my-app_2", ""));
+  TEST_ASSERT_EQUAL_STRING("/appdata/my-app_2", out);
+}
+
+void test_other_app_path_cannot_escape_appdata() {
+  TEST_ASSERT_FALSE(join_app("print", ".."));
+  TEST_ASSERT_FALSE(join_app("print", "../writer/x"));
+  TEST_ASSERT_FALSE(join_app("print", "a/../../x"));
+  TEST_ASSERT_FALSE(join_app("print", "/etc/passwd"));
+  TEST_ASSERT_FALSE(join_app("print", "a\\b"));
+  TEST_ASSERT_FALSE(join_app("print", nullptr));
+}
+
+void test_other_app_name_must_be_a_plain_name() {
+  TEST_ASSERT_FALSE(join_app("", "x"));
+  TEST_ASSERT_FALSE(join_app("..", "x"));
+  TEST_ASSERT_FALSE(join_app(".", "x"));
+  TEST_ASSERT_FALSE(join_app("a/b", "x"));
+  TEST_ASSERT_FALSE(join_app("/print", "x"));
+  TEST_ASSERT_FALSE(join_app("../apps", "x"));
+  TEST_ASSERT_FALSE(join_app("pr int", "x"));
+  TEST_ASSERT_FALSE(join_app("aaaaaaaaaaaaaaaaaaaaaaaaa", "x")); // 25
+  TEST_ASSERT_FALSE(join_app(nullptr, "x"));
+  TEST_ASSERT_FALSE(app_path_join_app(nullptr, "print", "x", out, sizeof(out)));
+  TEST_ASSERT_FALSE(app_path_join_app("/appdata", "print", "notes.txt", out, 10));
+}
+
+void test_write_to_a_read_only_handle_is_refused() {
+  TEST_ASSERT_EQUAL_INT(APP_EPERM, app_file_write_check(true));
+  TEST_ASSERT_EQUAL_INT(0, app_file_write_check(false));
+}
+
 void setUp(void) {}
 void tearDown(void) {}
 
@@ -61,5 +101,9 @@ int main(int argc, char **argv) {
   RUN_TEST(test_refuses_paths_out_of_the_folder);
   RUN_TEST(test_refuses_long_paths);
   RUN_TEST(test_app_name_from_elf_path);
+  RUN_TEST(test_other_app_file_is_readable_by_path);
+  RUN_TEST(test_other_app_path_cannot_escape_appdata);
+  RUN_TEST(test_other_app_name_must_be_a_plain_name);
+  RUN_TEST(test_write_to_a_read_only_handle_is_refused);
   return UNITY_END();
 }

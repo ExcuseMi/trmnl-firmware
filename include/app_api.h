@@ -23,9 +23,10 @@ extern "C" {
 
 #define APP_API_VERSION 2 // 2: keyboards, USB drive, Wi-Fi page (docs/apps.md "API 2")
 // Calls added to a version without a new one: an app checks api->size >= APP_API_SLOT(n + 1) before call n
-#define APP_API_MINOR 7 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
+#define APP_API_MINOR 8 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
                         // 2.4: ESP-NOW receive, touch hold; 2.5: orientation from the accelerometer;
-                        // 2.6: keyboard layout, settings form; 2.7: USB pen tablet
+                        // 2.6: keyboard layout, settings form; 2.7: USB pen tablet;
+                        // 2.8: other apps' files, read only
 
 // ---- app header ----
 
@@ -239,6 +240,8 @@ typedef struct app_file app_file_t; // opaque
 
 // list() callback: return false to stop
 typedef bool (*app_list_cb_t)(const char *name, bool is_dir, uint32_t size, void *ctx);
+// file_list_app() callback: also the modification time (Unix seconds, 0 when the file system has none)
+typedef bool (*app_list_ex_cb_t)(const char *name, bool is_dir, uint32_t size, int64_t mtime, void *ctx);
 
 // ---- net ----
 
@@ -394,6 +397,7 @@ typedef struct {
 #define APP_EBUSY -8 // the USB drive is showing the app's files (version 2)
 #define APP_ENOSPC -9 // no room: the drive cannot hold the files, or the X cannot hold the computer's
 #define APP_ENOCLOCK -10 // the clock was never set (no network since the battery was empty)
+#define APP_EPERM -11 // not allowed: a write to a read-only file handle (file_open_app)
 
 typedef struct app_api {
   uint32_t version; // APP_API_VERSION of the firmware
@@ -551,6 +555,19 @@ typedef struct app_api {
   int (*pen_enable)(int on);
   // Fills *out with the tablet connected now (vid 0: none). 0, or APP_EINVAL (out NULL)
   int (*pen_info)(app_pen_info_t *out);
+
+  // ---- API 2.8 (api->size >= APP_API_SLOT(53)): other apps' files, read only ----
+
+  // Calls cb(name, is_dir, 0, ctx) for each folder in /appdata whose name is a valid app name (letters, digits, - _,
+  // 1..24); its own included. Returns the count, or APP_EINVAL (cb NULL)
+  int (*file_list_apps)(app_list_cb_t cb, void *ctx);
+  // As file_list for the folder `dir` ("" the app's root) of the app `app`, with the modification time. `app` must be a
+  // valid app name, `dir` follows the file_list path rules (no "..", no leading slash). Returns the count, APP_EINVAL
+  // (bad name or path) or APP_ENOENT (no such folder). The time is the file system's (0 when it keeps none)
+  int (*file_list_app)(const char *app, const char *dir, app_list_ex_cb_t cb, void *ctx);
+  // Opens `path` of the app `app` for reading. Use file_read, file_seek and file_close; file_write on the handle
+  // returns APP_EPERM. NULL: bad name or path, no such file, too many open
+  app_file_t *(*file_open_app)(const char *app, const char *path);
 } app_api_t;
 
 #define APP_ORIENT_SETTLE_MS 1000
@@ -585,7 +602,8 @@ APP_API_ASSERT(offsetof(app_api_t, touch_hold) == APP_API_SLOT(40), "API 2.4: th
 APP_API_ASSERT(offsetof(app_api_t, device_orientation) == APP_API_SLOT(41), "API 2.5: orientation after the touch hold");
 APP_API_ASSERT(offsetof(app_api_t, keyboard_layout_name) == APP_API_SLOT(44), "API 2.6: layout after touchbar_layout");
 APP_API_ASSERT(offsetof(app_api_t, pen_enable) == APP_API_SLOT(48), "API 2.7: the pen after keyboard_chars");
-APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(50), "API 2.7 has 50 calls: a new one raises APP_API_MINOR");
+APP_API_ASSERT(offsetof(app_api_t, file_list_apps) == APP_API_SLOT(50), "API 2.8: other apps' files after the pen");
+APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(53), "API 2.8 has 53 calls: a new one raises APP_API_MINOR");
 APP_API_ASSERT(sizeof(app_pen_event_t) == sizeof(app_event_t), "a pen event fills an app_event_t");
 APP_API_ASSERT(offsetof(app_pen_event_t, x) == 2 && offsetof(app_pen_event_t, tilt_x) == 8 &&
                    offsetof(app_pen_event_t, changed) == 11, "app_pen_event_t is part of the app ABI");
@@ -595,6 +613,6 @@ APP_API_ASSERT(sizeof(app_espnow_pkt_t) == 258, "app_espnow_pkt_t is part of the
 APP_API_ASSERT(sizeof(app_local_time_t) == 16, "app_local_time_t is part of the app ABI");
 APP_API_ASSERT(sizeof(app_setting_decl_t) == 3 * sizeof(void *) + 12 + (sizeof(void *) == 8 ? 4 : 0),
                "app_setting_decl_t is part of the app ABI");
-APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 7, "a new version adds its own size check above");
+APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 8, "a new version adds its own size check above");
 
 #endif // APP_API_H

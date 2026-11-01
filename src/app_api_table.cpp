@@ -167,6 +167,7 @@ static void app_exit(int code) { app_host_finish(code); }
 struct app_file {
   File file;
   bool used;
+  bool read_only; // opened with file_open_app: another app's file
 };
 
 static app_file files[APP_HOST_MAX_FILES];
@@ -196,6 +197,7 @@ static app_file_t *file_open(const char *path, int mode) {
       return nullptr;
     }
     slot.used = true;
+    slot.read_only = false;
     return &slot;
   }
   return nullptr; // too many open
@@ -210,6 +212,7 @@ static int file_read(app_file_t *f, void *buf, size_t len) {
 static int file_write(app_file_t *f, const void *buf, size_t len) {
   app_file *slot = file_of(f);
   if (!slot || !buf) return APP_EINVAL;
+  if (int rc = app_file_write_check(slot->read_only)) return rc;
   size_t n = slot->file.write((const uint8_t *)buf, len);
   return n == len ? (int)n : APP_EIO; // short write: the file system is full
 }
@@ -225,6 +228,7 @@ static int file_close(app_file_t *f) {
   if (!slot) return APP_EINVAL;
   slot->file.close();
   slot->used = false;
+  slot->read_only = false;
   return 0;
 }
 
@@ -249,6 +253,62 @@ static int file_list(const char *dir, app_list_cb_t cb, void *ctx) {
   }
   root.close();
   return n;
+}
+
+// ---- API 2.8: other apps' files, read only ----
+
+static int file_list_apps(app_list_cb_t cb, void *ctx) {
+  if (!cb) return APP_EINVAL;
+  File root = LittleFS.open(APPS_DATA_DIR);
+  if (!root || !root.isDirectory()) return 0;
+  int n = 0;
+  while (File entry = root.openNextFile()) {
+    bool ok = entry.isDirectory() && app_path_app_ok(entry.name());
+    bool go_on = true;
+    if (ok) {
+      go_on = cb(entry.name(), true, 0, ctx);
+      n++;
+    }
+    entry.close();
+    if (!go_on) break;
+  }
+  root.close();
+  return n;
+}
+
+static int file_list_app(const char *app, const char *dir, app_list_ex_cb_t cb, void *ctx) {
+  char full[APP_PATH_MAX + 64];
+  if (!cb || !app_path_join_app(APPS_DATA_DIR, app, dir ? dir : "", full, sizeof(full))) return APP_EINVAL;
+  File root = LittleFS.open(full);
+  if (!root || !root.isDirectory()) return APP_ENOENT;
+  int n = 0;
+  while (File entry = root.openNextFile()) {
+    int64_t t = (int64_t)entry.getLastWrite(); // 0 when the file system keeps no time
+    bool go_on = cb(entry.name(), entry.isDirectory(), (uint32_t)entry.size(), t, ctx);
+    entry.close();
+    n++;
+    if (!go_on) break;
+  }
+  root.close();
+  return n;
+}
+
+static app_file_t *file_open_app(const char *app, const char *path) {
+  char full[APP_PATH_MAX + 64];
+  if (!path || !path[0] || !app_path_join_app(APPS_DATA_DIR, app, path, full, sizeof(full))) return nullptr;
+  if (!LittleFS.exists(full)) return nullptr;
+  for (auto &slot : files) {
+    if (slot.used) continue;
+    slot.file = LittleFS.open(full, FILE_READ);
+    if (!slot.file || slot.file.isDirectory()) {
+      slot.file.close();
+      return nullptr;
+    }
+    slot.used = true;
+    slot.read_only = true;
+    return &slot;
+  }
+  return nullptr; // too many open
 }
 
 static int file_rename(const char *from, const char *to) {
@@ -549,6 +609,8 @@ static const app_api_t table = {
     keyboard_layout_name, app_settings_x_declare,
     app_webshare_start_settings, keyboard_chars,
     pen_enable, usb_pen_x_info,
+    file_list_apps,  file_list_app,
+    file_open_app,
 };
 
 const app_api_t *app_api_table(void) {

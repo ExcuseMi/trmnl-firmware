@@ -37,6 +37,32 @@ bool app_path_join(const char *base, const char *rel, char *out, size_t out_len)
   return true;
 }
 
+bool app_path_app_ok(const char *app) {
+  if (!app) return false;
+  size_t len = strlen(app);
+  if (len == 0 || len > 24) return false;
+  for (size_t i = 0; i < len; i++) {
+    char c = app[i];
+    bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+    if (!ok) return false;
+  }
+  return true;
+}
+
+bool app_path_join_app(const char *data_dir, const char *app, const char *rel, char *out, size_t out_len) {
+  if (!data_dir || !app_path_app_ok(app)) return false;
+  char base[64];
+  size_t n = strlen(data_dir);
+  size_t a = strlen(app);
+  if (n + 1 + a + 1 > sizeof(base)) return false;
+  memcpy(base, data_dir, n);
+  base[n] = '/';
+  memcpy(base + n + 1, app, a + 1);
+  return app_path_join(base, rel, out, out_len);
+}
+
+int app_file_write_check(bool read_only) { return read_only ? APP_EPERM : 0; }
+
 bool app_path_name(const char *elf_path, char *name, size_t name_len) {
   static const char prefix[] = APPS_DIR "/";
   static const char suffix[] = ".elf";
