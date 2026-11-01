@@ -1,0 +1,75 @@
+#include <app_cable.h>
+#include <string.h>
+#include <unity.h>
+
+void setUp() { app_cable_busy_set(false); }
+void tearDown() {}
+
+void test_plan_not_running_installs_at_once() {
+  TEST_ASSERT_EQUAL(APP_CABLE_INSTALL_NOW, app_cable_plan(USB_ROLE_SERIAL, nullptr, "/apps/hello.elf"));
+  TEST_ASSERT_EQUAL(APP_CABLE_INSTALL_NOW, app_cable_plan(USB_ROLE_SERIAL, "", "/apps/hello.elf"));
+}
+
+void test_plan_same_app_running_restarts_it() {
+  TEST_ASSERT_EQUAL(APP_CABLE_REPLACE_AND_RESTART, app_cable_plan(USB_ROLE_SERIAL, "hello", "/apps/hello.elf"));
+}
+
+void test_plan_other_app_running_keeps_it() {
+  TEST_ASSERT_EQUAL(APP_CABLE_INSTALL_KEEP_RUNNING, app_cable_plan(USB_ROLE_SERIAL, "hello2", "/apps/hello.elf"));
+  TEST_ASSERT_EQUAL(APP_CABLE_INSTALL_KEEP_RUNNING, app_cable_plan(USB_ROLE_SERIAL, "hell", "/apps/hello.elf"));
+}
+
+void test_plan_host_mode_and_drive_get_an_error() {
+  TEST_ASSERT_EQUAL(APP_CABLE_REFUSE_PORT, app_cable_plan(USB_ROLE_HOST, nullptr, "/apps/hello.elf"));
+  TEST_ASSERT_EQUAL(APP_CABLE_REFUSE_PORT, app_cable_plan(USB_ROLE_HOST, "hello", "/apps/hello.elf"));
+  TEST_ASSERT_EQUAL(APP_CABLE_REFUSE_PORT, app_cable_plan(USB_ROLE_DRIVE, nullptr, "/apps/hello.elf"));
+  TEST_ASSERT_NOT_NULL(strstr(app_cable_refusal(USB_ROLE_HOST), "host mode"));
+  TEST_ASSERT_NOT_NULL(strstr(app_cable_refusal(USB_ROLE_DRIVE), "drive"));
+}
+
+static const char *feed(app_cable_line_t *l, const char *s) {
+  const char *h = nullptr;
+  for (; *s; s++)
+    if (app_cable_line_feed(l, (unsigned char)*s, &h)) return h;
+  return nullptr;
+}
+
+void test_header_of_full_length_is_seen_after_noise() {
+  app_cable_line_t l;
+  app_cable_line_init(&l);
+  // longer than the 32 byte line of app_serial.h: the name alone is 24 characters
+  const char *h = feed(&l, "boot noise\r\nxx TAPP PUT abcdefghijklmnopqrstuvwx.elf 123456 0a1b2c3d\r\n");
+  TEST_ASSERT_NOT_NULL(h);
+  TEST_ASSERT_EQUAL_STRING("TAPP PUT abcdefghijklmnopqrstuvwx.elf 123456 0a1b2c3d", h);
+}
+
+void test_other_lines_and_overlong_noise_are_not_headers() {
+  app_cable_line_t l;
+  app_cable_line_init(&l);
+  TEST_ASSERT_NULL(feed(&l, "TAPP EVLOG\n"));
+  TEST_ASSERT_NULL(feed(&l, "TKEY hello\n"));
+  char noise[300];
+  memset(noise, 'x', sizeof(noise) - 2);
+  noise[sizeof(noise) - 2] = '\n';
+  noise[sizeof(noise) - 1] = '\0';
+  TEST_ASSERT_NULL(feed(&l, noise));
+  TEST_ASSERT_NOT_NULL(feed(&l, "TAPP PUT a.elf 1 0\n")); // still works after the flood
+}
+
+void test_busy_flag() {
+  TEST_ASSERT_FALSE(app_cable_busy());
+  app_cable_busy_set(true);
+  TEST_ASSERT_TRUE(app_cable_busy());
+}
+
+int main(int, char **) {
+  UNITY_BEGIN();
+  RUN_TEST(test_plan_not_running_installs_at_once);
+  RUN_TEST(test_plan_same_app_running_restarts_it);
+  RUN_TEST(test_plan_other_app_running_keeps_it);
+  RUN_TEST(test_plan_host_mode_and_drive_get_an_error);
+  RUN_TEST(test_header_of_full_length_is_seen_after_noise);
+  RUN_TEST(test_other_lines_and_overlong_noise_are_not_headers);
+  RUN_TEST(test_busy_flag);
+  return UNITY_END();
+}
