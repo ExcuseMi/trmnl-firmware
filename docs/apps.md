@@ -35,6 +35,7 @@ The firmware calls `int app_main(const app_api_t *api)`. Return 0 when done, any
 | keyboard layout (API 2.6) | `keyboard_layout_name()`: the X's layout for help text; keys come mapped by it after `keyboard_chars(1)` (default off: APP_KEY_HID as before, for apps with their own layouts like the writer; check `APP_API_SLOT(48)`), see "Keyboard layout" below. Check `api->size >= APP_API_SLOT(45)` first |
 | settings form (API 2.6) | `settings_declare(decls, n)`, `webshare_start_settings(mode)`, `APP_EVENT_SETTINGS`: the app's settings typed on the phone, see "Settings profile" below. Check `api->size >= APP_API_SLOT(47)` first |
 | pen tablet (API 2.7) | `pen_enable(1)`, `pen_info(&info)`, `APP_EVENT_PEN`, `APP_EVENT_PEN_KEY`: a USB pen tablet, see "Pen tablet" below. Check `api->size >= APP_API_SLOT(50)` first |
+| other apps' files (API 2.8) | `file_list_apps(cb, ctx)`, `file_list_app(app, dir, cb, ctx)` (callback also gets the modification time), `file_open_app(app, path)`: read only, see "Other apps' files" below. Check `api->size >= APP_API_SLOT(53)` first |
 
 Errors are negative `APP_E*` values.
 
@@ -208,6 +209,19 @@ An app takes its own files over Wi-Fi (the Game Boy app: `.gb` / `.gbc` ROMs). `
 | Delete | only a listed file (extension and name rules), only after the phone's confirm; never a save, the temporary file or a folder |
 | Messages | name or type: "name or type not allowed; only .gb .gbc"; size; full disk "not enough space" |
 | Old firmware | `api->size < APP_API_SLOT(37)`: the call is not there, the app says so and carries on |
+
+## Other apps' files (API 2.8)
+
+For the Print app: list and read what other apps keep. Rules in `lib/trmnl/src/app_path.cpp` (test `test_app_path`), glue in `src/app_api_table.cpp`.
+
+| Call | Rule |
+|---|---|
+| `file_list_apps` | folders of `/appdata` with a valid app name (1..24 of letters, digits, `-`, `_`); own app included; returns the count |
+| `file_list_app(app, dir, cb, ctx)` | `cb(name, is_dir, size, mtime, ctx)`; `mtime` is the file system's Unix time, 0 when it keeps none (read with `getLastWrite`, no extra cost per entry). `APP_EINVAL` for a bad name or path, `APP_ENOENT` for no such folder |
+| `file_open_app(app, path)` | handle for `file_read`, `file_seek`, `file_close` (same 8 handles as `file_open`); `file_write` on it returns `APP_EPERM`; NULL for a bad name or path, a missing file or a folder |
+| Paths | the `file_open` rules (no `..`, no leading slash, no empty or `.` part, no backslash) under `/appdata/<app>/`; an app name with `/`, `.` or other characters is refused, so nothing outside `/appdata` is reachable |
+| Secrets | `setting_*` values live in NVS (namespace per app), not under `/appdata`: this API cannot read them. Files an app writes itself are readable by every app |
+| Old firmware | `api->size < APP_API_SLOT(53)`: the calls are not there |
 
 ## ESP-NOW (API 2.4)
 
