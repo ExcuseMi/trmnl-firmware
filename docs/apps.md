@@ -20,7 +20,7 @@ The firmware calls `int app_main(const app_api_t *api)`. Return 0 when done, any
 | files | `file_open/read/write/seek/close/list/rename/remove/mkdir`, paths relative to `/appdata/<app>/` |
 | time | `millis`, `wall_time` (Unix s, 0 if unset), `sleep_ms` (yields, returns early on an event) |
 | log | `log(fmt, ...)` |
-| net | `net_up` (saved 2.4 GHz network; 5 GHz goes through the modem: not yet), `http_request` (method, URL, headers, body; response into the app's buffer; TLS with the IDF certificate bundle) |
+| net | `net_up` (saved 2.4 GHz network on the S3; saved 5 GHz network through the ESP32-C5 modem, "Modem path" below), `http_request` (method, URL, headers, body; response into the app's buffer; TLS with the IDF certificate bundle on the S3 path) |
 | settings | `setting_get/set`: up to 256 bytes per key, NVS, per app |
 | exit | `exit(code)`: ends the app now |
 | USB drive (API 2) | `usb_drive_start(timeout)`, `usb_drive_state`, `usb_drive_stop(result)`: below |
@@ -392,6 +392,18 @@ screens and the app (a tap on release, a long press after 1.5 s). Each event is 
 `Touch: iqs323 chN down / tap / long press (N ms) -> <consumer>`. A mode switch of the IQS323 reads and publishes its
 status: the switch can take the window of a touch event, and that touch then never reached the snapshot.
 
+### Modem path (5 GHz)
+
+| What | Rule |
+|---|---|
+| path choice | saved 5 GHz network (not enterprise) and the modem answers: `net_up` joins it on the modem (`AT+CWSTATE?`, else `AT+CWJAP`), `http_request` goes through it; 2.4 GHz stays on the S3. The Wi-Fi page never uses the modem (it serves from the S3). Rules `net_up_step` in `radio_share.h`, test `test_radio_share` |
+| why not ESP-AT's HTTP commands | `AT+HTTPCLIENT` takes a body only inside a 256-byte command; `AT+HTTPCPOST`/`PUT` keep the whole body in the modem's heap (`esp_http_client_set_post_field`, no streaming in `libesp32c5_at_core.a` v5.1) and print no status code |
+| how | the S3 speaks HTTP/1.1 over one `AT+CIPSTART` TCP or SSL link (`src/app_net_modem.cpp`, `lib/trmnl_x/src/modem_tcp.cpp`): request head, then the body straight from the app's buffer in `AT+CIPSEND` pieces of 8192 bytes (no copy, any size); response from `+IPD` frames into the app's buffer (Content-Length, chunked or until close; `truncated` as on the S3 path); `Connection: close`, no redirects (as on the S3 path) |
+| https | `SSL` link with SNI (`AT+CIPSSLCSNI`); the server certificate is **not verified** (the AT firmware holds no CA bundle) |
+| errors | as on the S3 path: no modem or join failed `APP_ENONET`, bad URL or head over 2048 bytes `APP_EINVAL`, connect (DNS, refused, TLS), send, timeout or no response `APP_ETIMEDOUT`; a status line means 0, also when the server answered early (413) and the body was not sent in full. Timeout: `timeout_ms` (0: 15 s) for the connect, each piece and the response's silence |
+| log | `Net: up in N ms (modem 5 GHz, joined/already, rssi ...)`; per request `Net: modem <method> <status>, sent N, got N, N ms` or `Net: modem <method> failed: <reason>, sent N, N ms` |
+| pure parts | `modem_http.h` (URL, head, pieces, response, outcome, errors), `modem_at_rx.h` (lines, `>` prompt, `+IPD` frames in any split); test `test_modem_http` |
+
 ## Tests
 
 | What | Where | Run |
@@ -410,6 +422,7 @@ status: the switch can take the window of a touch event, and that touch then nev
 | position from accelerometer samples: sectors, TRMNL's angle, flat, hysteresis, settle time, noise, flat keeps the last, wobble at an edge; touch bar zones and hint boxes in the four positions | `test/test_orient_sense`, `test/test_touchbar_layout` | `pio test -e native -f test_orient_sense -f test_touchbar_layout` |
 | event log on the simulated X: `TAPP EVLOG` lists the app's start across a restart, `CLEAR` | `test/sim/test_evlog.py` | below |
 | `http_request` open failures: out of memory (TLS setup, handshake bignums, certificates, ESP_ERR_NO_MEM) is `APP_ENOMEM`, others `APP_ETIMEDOUT` | `test/test_http_open_error` | `pio test -e native -f test_http_open_error` |
+| modem path: path choice per saved band and modem; URL, request head, 1 MB body in 8192-byte pieces, `+IPD` framing split anywhere, response (length, chunked, 1xx, truncated, cut off, bad), outcome and error codes | `test/test_modem_http`, `test/test_radio_share` | `pio test -e native -f test_modem_http -f test_radio_share` |
 | no TRMNL sleep while an app or install screen runs | `test/test_app_sleep_gate` | `pio test -e native -f test_app_sleep_gate` |
 | on the simulated X: upload over USB serial, other files kept, bad CRC, cut-off upload, refused headers | `test/sim/test_upload.py` | below |
 | on the simulated X: the charger pin read with the right polarity, device mode while docked and in a short power gap, serial keys still work | `test/sim/test_keyboards.py` (the sim has no USB-OTG controller: host mode is not simulated) | below |
@@ -431,7 +444,7 @@ Sim tests: build `pio run -e TRMNL_X`, the simulator (`cargo build --release` in
 
 Not proven on a real X: everything in USB host mode (boost powers the port, PG while the boost runs, enumeration of
 a keyboard through an OTG adapter, clean switch back, flashing afterwards), PSRAM code execution on the device's cache settings, the panel output of the app's
-framebuffer (1-bit and gray), partial refresh, touch timing on the real IQS323, HTTPS from an app.
+framebuffer (1-bit and gray), partial refresh, touch timing on the real IQS323, HTTPS from an app, everything on the modem path (join from an app, `AT+CIPSTART`/`CIPSEND`/`+IPD` against the real AT firmware, a 1 MB IPP print, https over the modem).
 
 | Step | Look for |
 |---|---|

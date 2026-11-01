@@ -258,6 +258,27 @@ void test_error_mapping() {
   TEST_ASSERT_EQUAL_STRING("connect failed (DNS, refused or TLS)", modem_http_fail_name(MODEM_HTTP_CONNECT_FAILED));
 }
 
+// A 1xx is not an answer; a status line is, also when the body upload failed (413 and close) or was cut short
+void test_outcome_per_response_state() {
+  modem_resp_t r;
+  modem_resp_init(&r, nullptr, 0, false);
+  TEST_ASSERT_TRUE(modem_resp_wants_body(&r));
+  TEST_ASSERT_EQUAL(MODEM_HTTP_TIMEOUT, modem_http_outcome(&r, true, true));
+  TEST_ASSERT_EQUAL(MODEM_HTTP_BAD_RESPONSE, modem_http_outcome(&r, true, false)); // closed without a word
+  TEST_ASSERT_EQUAL(MODEM_HTTP_SEND_FAILED, modem_http_outcome(&r, false, false));
+  feed_str(&r, "HTTP/1.1 100 Continue\r\n\r\n", 5);
+  TEST_ASSERT_TRUE(modem_resp_wants_body(&r));
+  TEST_ASSERT_EQUAL(MODEM_HTTP_TIMEOUT, modem_http_outcome(&r, true, true));
+  feed_str(&r, "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 10\r\n\r\nabc", 5);
+  TEST_ASSERT_FALSE(modem_resp_wants_body(&r));
+  TEST_ASSERT_EQUAL(MODEM_HTTP_OK, modem_http_outcome(&r, false, false));
+  TEST_ASSERT_EQUAL(413, r.status);
+  modem_resp_init(&r, nullptr, 0, false);
+  feed_str(&r, "garbage\r\n", 5);
+  TEST_ASSERT_FALSE(modem_resp_wants_body(&r));
+  TEST_ASSERT_EQUAL(MODEM_HTTP_BAD_RESPONSE, modem_http_outcome(&r, true, true));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_url_plain_http_with_port);
@@ -277,5 +298,6 @@ int main() {
   RUN_TEST(test_response_head_and_204_have_no_body);
   RUN_TEST(test_response_bad_or_cut_off);
   RUN_TEST(test_error_mapping);
+  RUN_TEST(test_outcome_per_response_state);
   return UNITY_END();
 }

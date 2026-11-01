@@ -254,6 +254,15 @@ bool modem_resp_enough(const modem_resp_t *r) {
   return in_body && r->truncated;
 }
 
+modem_http_fail_t modem_http_outcome(const modem_resp_t *r, bool send_ok, bool timed_out) {
+  if (r->state == MODEM_RESP_BAD) return MODEM_HTTP_BAD_RESPONSE;
+  if (r->status >= 200) return MODEM_HTTP_OK;
+  if (!send_ok) return MODEM_HTTP_SEND_FAILED;
+  return timed_out ? MODEM_HTTP_TIMEOUT : MODEM_HTTP_BAD_RESPONSE;
+}
+
+bool modem_resp_wants_body(const modem_resp_t *r) { return r->state != MODEM_RESP_BAD && r->status < 200; }
+
 int modem_http_app_error(modem_http_fail_t f) {
   switch (f) {
   case MODEM_HTTP_OK: return 0;

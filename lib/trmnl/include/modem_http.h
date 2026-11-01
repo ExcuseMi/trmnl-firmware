@@ -78,6 +78,12 @@ typedef enum {
   MODEM_HTTP_BAD_RESPONSE, // no status line before the link closed, or not HTTP
 } modem_http_fail_t;
 
+// How a request that reached the server ended: a status line means 0 (as on the S3 path, also with a body cut
+// short), else why not. `timed_out`: the response stopped arriving (not closed).
+modem_http_fail_t modem_http_outcome(const modem_resp_t *r, bool send_ok, bool timed_out);
+// The body may still go out: the server has not answered yet (or only with 1xx)
+bool modem_resp_wants_body(const modem_resp_t *r);
+
 // The app-facing code, as on the S3 path: 0, APP_ENONET, APP_EINVAL, APP_ETIMEDOUT (DNS, TLS, transport)
 int modem_http_app_error(modem_http_fail_t f);
 const char *modem_http_fail_name(modem_http_fail_t f);

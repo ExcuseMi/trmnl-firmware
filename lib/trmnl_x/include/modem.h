@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <functional>
+#include <modem_at_rx.h>
 #include <vector>
 
 // UART pins (ESP32-S3 to ESP32-C5)
@@ -16,6 +17,20 @@ private:
   uint32_t baudRate;
   bool _initialized = false;
   String waitForResponse(const String& expected, unsigned long timeoutMs);
+
+  // TCP/SSL link state (modem_tcp.cpp)
+  modem_at_rx_t _rx;
+  void (*_sink)(void *ctx, const uint8_t *data, size_t len) = nullptr;
+  void *_sinkCtx = nullptr;
+  const char *const *_want = nullptr;
+  size_t _wantCount = 0;
+  int _hit = -1;
+  bool _prompt = false, _closed = true;
+  size_t tcpRead();
+  int tcpWait(const char *const *want, size_t count, uint32_t timeoutMs, bool prompt);
+  static void tcpOnLine(void *ctx, const char *line);
+  static void tcpOnPrompt(void *ctx);
+  static void tcpOnPayload(void *ctx, const uint8_t *data, size_t len);
 
 public:
   Modem(uint32_t baudRate);
@@ -63,4 +78,18 @@ public:
 
   // Returns the RSSI (dBm) of the currently joined AP, (replaces WiFi.RSSI() on TRMNL_X)
   int32_t getSignalRssi();
+
+  // AT+CWSTATE?: joined and holding an IPv4 address
+  bool isJoined();
+
+  // One TCP or SSL link for apps' HTTP (modem_tcp.cpp; pure framing in modem_at_rx.h). While it is open every
+  // received byte goes to `sink`. SSL does not verify the server (the AT firmware holds no CA bundle).
+  typedef void (*TcpSink)(void *ctx, const uint8_t *data, size_t len);
+  bool tcpOpen(const char *host, uint16_t port, bool tls, uint32_t timeoutMs, TcpSink sink, void *ctx);
+  // One AT+CIPSEND of at most MODEM_SEND_MAX bytes (modem_http.h); true on SEND OK
+  bool tcpSend(const uint8_t *data, size_t len, uint32_t timeoutMs);
+  enum TcpPumpEnd { TCP_PUMP_IDLE, TCP_PUMP_CLOSED, TCP_PUMP_ENOUGH };
+  // Reads until the server closes, `enough(ctx)` or `idleMs` pass without a byte
+  TcpPumpEnd tcpPump(uint32_t idleMs, bool (*enough)(void *ctx), void *ctx);
+  void tcpClose();
 };

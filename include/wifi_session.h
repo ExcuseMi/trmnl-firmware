@@ -23,3 +23,12 @@ void wifiSessionInit(void);
  *        (false on timer wakes: the quiet retries leave the current image up)
  */
 void wifiSessionConnect(bool should_show_error_now);
+
+#ifdef BOARD_TRMNL_X
+class Modem;
+/**
+ * The ESP32-C5 modem for an app's net_up on a saved 5 GHz network: the one TRMNL's session set up, or set up now
+ * (once per boot). nullptr when no 5 GHz network is saved or the modem does not answer.
+ */
+Modem *wifiSessionModem(void);
+#endif

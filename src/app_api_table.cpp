@@ -39,10 +39,12 @@
 #include <sys/time.h>
 #include <trmnl_log.h>
 #include <wifi_network.h>
+#include <wifi_session.h>
 
 #include "orientation_x.h"
 
 #include "app_host.h"
+#include "app_net_modem.h"
 #include "app_settings_x.h"
 #include "kbd_layout_x.h"
 #include "displayed_image.h"
@@ -339,23 +341,30 @@ static int file_mkdir(const char *path) {
 
 // ---- net ----
 
-// One log line per call (radio_share.h): the device log says why an app saw "no network"
-static bool net_up(void) {
+// One log line per call (radio_share.h): the device log says why an app saw "no network".
+// `allow_modem`: an app's net_up and http_request may use the modem on a saved 5 GHz network; the Wi-Fi page may not
+// (it serves from the S3's own station).
+typedef enum { NET_PATH_NONE, NET_PATH_S3, NET_PATH_MODEM } net_path_t;
+
+static net_path_t net_up_on(bool allow_modem) {
   if (radio_claim_check(espnow_app_radio_users(), RADIO_WANT_NET)) {
     Log_event("Net: refused, ESP-NOW holds the radio (espnow_stop first)");
-    return false;
+    return NET_PATH_NONE;
   }
   uint32_t t0 = millis();
   bool ble = ble_keyboard_radio_on();
-  net_up_state_t s = {WiFi.status() == WL_CONNECTED, false, false};
+  net_up_state_t s = {WiFi.status() == WL_CONNECTED, false, false, false};
   if (!s.connected) {
     s.saved = WifiCaptivePortal.isSaved();
-    // 5 GHz networks go through the modem, whose AT interface has no HTTP client for apps yet
-    s.is5ghz = s.saved && WifiCaptivePortal.getLastCredentials().is5GHz;
+    WifiCredentials creds = WifiCaptivePortal.getLastCredentials();
+    s.is5ghz = s.saved && creds.is5GHz;
+    // 5 GHz networks go through the modem (the S3 has only 2.4 GHz); enterprise networks the modem path cannot join
+    s.modem = allow_modem && s.is5ghz && !creds.isEnterprise && wifiSessionModem() != nullptr;
   }
   net_up_report_t r = {};
   r.step = net_up_step(s);
   r.up = r.step == NET_UP_ALREADY;
+  r.rssi = WiFi.RSSI();
   if (r.step == NET_UP_JOIN) {
     // Sharing the radio with a Bluetooth keyboard: modem sleep during the join too, so the coexistence scheduler
     // gives each its slots (TRMNL's connect turns sleep off; Arduino applies the setting when the station starts)
@@ -366,20 +375,25 @@ static bool net_up(void) {
     r.up = connectWithSavedCredentials();
     WifiCaptivePortal.setJoinModemSleep(false);
     if (r.up && modem) WiFi.setSleep(WIFI_PS_MIN_MODEM);
+    r.rssi = WiFi.RSSI();
+  } else if (r.step == NET_UP_MODEM) {
+    r.up = app_net_modem_up(&r.modem_joined, &r.rssi);
   }
   r.ms = millis() - t0;
   r.wl_status = (int)WiFi.status();
-  r.rssi = WiFi.RSSI();
   r.ble_on = ble;
   r.kbd_connected = ble && ble_keyboard_connected();
   r.internal_free = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   char line[200];
   net_up_log_line(line, sizeof(line), &r);
   Log_event("%s", line);
-  return r.up;
+  if (!r.up) return NET_PATH_NONE;
+  return r.step == NET_UP_MODEM ? NET_PATH_MODEM : NET_PATH_S3;
 }
 
-bool app_host_net_up(void) { return net_up(); }
+static bool net_up(void) { return net_up_on(true) != NET_PATH_NONE; }
+
+bool app_host_net_up(void) { return net_up_on(false) == NET_PATH_S3; }
 
 // http_open_error.h keeps the codes it classifies without the IDF headers (native tests)
 static_assert(HTTP_OPEN_ESP_ERR_NO_MEM == ESP_ERR_NO_MEM, "ESP_ERR_NO_MEM");
@@ -399,7 +413,9 @@ static_assert(HTTP_OPEN_MBEDTLS_ERR_LMS_ALLOC_FAILED == MBEDTLS_ERR_LMS_ALLOC_FA
 static int http_request(const app_http_request_t *req, void *buf, size_t buf_len, app_http_response_t *resp) {
   if (!req || !req->url || !resp || (!buf && buf_len)) return APP_EINVAL;
   *resp = {APP_ENONET, 0, false};
-  if (!net_up()) return APP_ENONET;
+  net_path_t path = net_up_on(true);
+  if (path == NET_PATH_NONE) return APP_ENONET;
+  if (path == NET_PATH_MODEM) return app_net_modem_request(req, buf, buf_len, resp);
   esp_http_client_config_t config = {};
   config.url = req->url;
   config.timeout_ms = req->timeout_ms ? (int)req->timeout_ms : 15000;

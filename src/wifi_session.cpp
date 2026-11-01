@@ -30,20 +30,35 @@ static bool wifiSessionModemNeeded(void) {
   return true; // captive portal needs modem for 5 GHz
 }
 
+// The one modem instance; it is set up once, a failed setup stays failed until the next boot
+static void wifiSessionStartModem(void) {
+  modem_reset_target(); // Must be done BEFORE the instantiation of the class since it expects the modem to be ready
+  static Modem modemInstance(115200);
+  if (modemInstance.isInitialized()) {
+    g_modem = &modemInstance;
+  } else {
+    Log_info("Modem init failed — falling back to 2.4 GHz mode");
+    g_modem = nullptr;
+  }
+}
+
+Modem *wifiSessionModem(void) {
+  static bool tried = false;
+  if (g_modem || tried) return g_modem;
+  if (!(WifiCaptivePortal.isSaved() && WifiCaptivePortal.getLastCredentials().is5GHz)) return nullptr;
+  tried = true; // an app started without TRMNL's Wi-Fi session (no refresh since boot)
+  Log_info("Modem: starting it for an app's network");
+  wifiSessionStartModem();
+  return g_modem;
+}
+
 static void wifiSessionPrepareModem(void) {
   Log.info("%s [%d]: Checking if we need to use the ESP32-C5 modem...\r\n", __FILE__, __LINE__);
   const bool bModemNeeded = wifiSessionModemNeeded();
   Log.info("%s [%d]: modem needed = %d\n\r", __FILE__, __LINE__, bModemNeeded);
 
   if (bModemNeeded) {
-    modem_reset_target(); // Must be done BEFORE the instantiation of the class since it expects the modem to be ready
-    static Modem modemInstance(115200);
-    if (modemInstance.isInitialized()) {
-      g_modem = &modemInstance;
-    } else {
-      Log_info("Modem init failed — falling back to 2.4 GHz mode");
-      g_modem = nullptr;
-    }
+    wifiSessionStartModem();
   } else {
     g_modem = nullptr;
   }
