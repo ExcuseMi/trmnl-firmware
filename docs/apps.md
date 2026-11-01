@@ -36,6 +36,7 @@ The firmware calls `int app_main(const app_api_t *api)`. Return 0 when done, any
 | settings form (API 2.6) | `settings_declare(decls, n)`, `webshare_start_settings(mode)`, `APP_EVENT_SETTINGS`: the app's settings typed on the phone, see "Settings profile" below. Check `api->size >= APP_API_SLOT(47)` first |
 | pen tablet (API 2.7) | `pen_enable(1)`, `pen_info(&info)`, `APP_EVENT_PEN`, `APP_EVENT_PEN_KEY`: a USB pen tablet, see "Pen tablet" below. Check `api->size >= APP_API_SLOT(50)` first |
 | other apps' files (API 2.8) | `file_list_apps(cb, ctx)`, `file_list_app(app, dir, cb, ctx)` (callback also gets the modification time), `file_open_app(app, path)`: read only, see "Other apps' files" below. Check `api->size >= APP_API_SLOT(53)` first |
+| finding services (API 2.10) | `net_browse("_ipp._tcp", timeout_ms, cb, ctx)`: see "Finding services" below. Check `api->size >= APP_API_SLOT(56)` first |
 | launching an app (API 2.9) | `app_launch(app, arg)`, `app_arg(out, n)`: see "Launching an app" below. Check `api->size >= APP_API_SLOT(55)` first |
 
 Errors are negative `APP_E*` values.
@@ -239,6 +240,18 @@ An app hands over to another one (Sketch to Print and back). Rules in `lib/trmnl
 | Lost | a launch is dropped when the app ends by a long press, by an error or by a crash; then TRMNL shows its image as always |
 | Resume after a restart | the argument and the launch live in RAM only: a restart resumes the running app (`app_last`) with `""`, never an old argument. An app must open sensibly without an argument |
 | Chain | the runner loops (no recursion), so apps may hand over back and forth |
+
+## Finding services (API 2.10)
+
+Pure parts in `lib/trmnl/src/net_browse.cpp` (test `test_net_browse`), glue in `src/app_net_browse.cpp` and `src/app_api_table.cpp`.
+
+| | |
+|---|---|
+| call | `net_browse(service, timeout_ms, cb, ctx)`: `cb(name, host, port, path, ctx)` per result (name = instance name, host = IPv4 text, path = TXT `rp` without a leading slash, `""` when none). 0 timeout = 5 s, at most 60 s; at most 8 results, no duplicates (same host and port); a name has no control characters; a bad `rp` becomes `""` |
+| returns | the count (0: none), `APP_EINVAL` (bad service, no cb), `APP_ENOTSUP` (modem path, not `_ipp._tcp`), `APP_ENONET`, `APP_EBUSY` (ESP-NOW), `APP_ENOMEM`, `APP_EIO` |
+| 2.4 GHz network | the S3 asks mDNS (`mdns_query_ptr`); starts its own mDNS only when none runs; an entry without an IPv4 address is looked up once (1.5 s), else dropped |
+| saved 5 GHz network | the ESP-AT firmware (v5.1) has no mDNS query. Fallback: the modem's address (`AT+CIPSTA?`), then every address of its /24 nearest first (self+1, self-1, self+2, ...) gets a TCP connect to 631 with a 300 ms wait; a hit gets an IPP Get-Printer-Attributes (`printer-make-and-model`) at `ipp/print`; stops after 4 printers or `timeout_ms`. A hit that answers HTTP but not IPP is listed under its address. Not measured on a device yet: the walk covers about `timeout_ms / 0.4 s` addresses |
+| memory | one 1400-byte reply buffer and one list of 8, both static |
 
 ## ESP-NOW (API 2.4)
 

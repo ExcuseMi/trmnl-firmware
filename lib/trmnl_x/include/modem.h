@@ -85,7 +85,10 @@ public:
   // One TCP or SSL link for apps' HTTP (modem_tcp.cpp; pure framing in modem_at_rx.h). While it is open every
   // received byte goes to `sink`. SSL does not verify the server (the AT firmware holds no CA bundle).
   typedef void (*TcpSink)(void *ctx, const uint8_t *data, size_t len);
-  bool tcpOpen(const char *host, uint16_t port, bool tls, uint32_t timeoutMs, TcpSink sink, void *ctx);
+  // quick: wait only timeoutMs (no 5 s minimum), one try, a connect that got no answer is closed (address probes)
+  bool tcpOpen(const char *host, uint16_t port, bool tls, uint32_t timeoutMs, TcpSink sink, void *ctx, bool quick = false);
+  // The station's IPv4 address in host order (AT+CIPSTA?), 0 when there is none
+  uint32_t getIp();
   // One AT+CIPSEND of at most MODEM_SEND_MAX bytes (modem_http.h); true on SEND OK
   bool tcpSend(const uint8_t *data, size_t len, uint32_t timeoutMs);
   enum TcpPumpEnd { TCP_PUMP_IDLE, TCP_PUMP_CLOSED, TCP_PUMP_ENOUGH };

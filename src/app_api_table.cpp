@@ -20,6 +20,7 @@
 #include <esp_http_client.h>
 #include <http_open_error.h>
 #include <kbd_layout.h>
+#include <net_browse.h>
 #include <mbedtls/asn1.h>
 #include <mbedtls/bignum.h>
 #include <mbedtls/cipher.h>
@@ -46,6 +47,7 @@
 
 #include "app_host.h"
 #include "app_net_modem.h"
+#include "app_net_browse.h"
 #include "app_settings_x.h"
 #include "kbd_layout_x.h"
 #include "displayed_image.h"
@@ -624,6 +626,31 @@ static int touch_hold(uint32_t zones) {
   return 0;
 }
 
+// ---- API 2.10: net_browse (app_net_browse.cpp) ----
+
+static nb_list_t browse_list; // off the app's stack; net_browse is not re-entered
+
+static int net_browse(const char *service, uint32_t timeout_ms, app_browse_cb_t cb, void *ctx) {
+  char svc[17], proto[17];
+  if (!cb || !nb_service_split(service, svc, proto, sizeof(svc))) return APP_EINVAL;
+  if (timeout_ms == 0) timeout_ms = 5000;
+  if (timeout_ms > 60000) timeout_ms = 60000;
+  bool ipp = strcmp(service, "_ipp._tcp") == 0;
+  net_path_t path = net_up_on(true);
+  if (path == NET_PATH_NONE) return APP_ENONET;
+  if (path == NET_PATH_MODEM && !ipp) return APP_ENOTSUP;
+  nb_list_init(&browse_list);
+  int rc = path == NET_PATH_MODEM ? app_net_browse_modem(timeout_ms, &browse_list)
+                                  : app_net_browse_s3(svc, proto, timeout_ms, &browse_list);
+  Log_event("Net: browse %s: %d", service, rc);
+  if (rc < 0) return rc;
+  for (int i = 0; i < browse_list.n; i++) {
+    const nb_item_t *it = &browse_list.item[i];
+    cb(it->name, it->host, it->port, it->path, ctx);
+  }
+  return browse_list.n;
+}
+
 static const app_api_t table = {
     APP_API_VERSION, sizeof(app_api_t),
     screen_width,    screen_height,
@@ -656,6 +683,7 @@ static const app_api_t table = {
     file_list_apps,  file_list_app,
     file_open_app,
     app_launch_call, app_arg_call,
+    net_browse,
 };
 
 const app_api_t *app_api_table(void) {

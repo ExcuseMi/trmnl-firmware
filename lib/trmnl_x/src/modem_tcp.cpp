@@ -6,6 +6,8 @@
 #include <Arduino.h>
 #include <string.h>
 
+#include <net_browse.h>
+
 #include "modem.h"
 
 void Modem::tcpOnLine(void *ctx, const char *line) {
@@ -79,7 +81,22 @@ bool Modem::isJoined() {
   return idx >= 0 && resp.charAt(idx + 9) == '2'; // 2: connected, IPv4 address obtained
 }
 
-bool Modem::tcpOpen(const char *host, uint16_t port, bool tls, uint32_t timeoutMs, TcpSink sink, void *ctx) {
+// The station's IPv4 address in host order (AT+CIPSTA?), 0 when there is none
+uint32_t Modem::getIp() {
+  while (ModemSerial.available()) ModemSerial.read();
+  sendCommand("AT+CIPSTA?");
+  String resp = waitForResponse("OK", 3000);
+  int idx = resp.indexOf("+CIPSTA:ip:\"");
+  if (idx < 0) return 0;
+  idx += 12;
+  int end = resp.indexOf('"', idx);
+  uint32_t ip = 0;
+  if (end < 0 || end - idx > 15) return 0;
+  String s = resp.substring(idx, end);
+  return nb_ip_parse(s.c_str(), &ip) ? ip : 0;
+}
+
+bool Modem::tcpOpen(const char *host, uint16_t port, bool tls, uint32_t timeoutMs, TcpSink sink, void *ctx, bool quick) {
   static const char *const okErr[] = {"OK", "ERROR"};
   static const char *const start[] = {"OK", "ERROR", "ALREADY CONNECTED"};
   while (ModemSerial.available()) ModemSerial.read();
@@ -99,18 +116,24 @@ bool Modem::tcpOpen(const char *host, uint16_t port, bool tls, uint32_t timeoutM
   _sink = sink;
   _sinkCtx = ctx;
   snprintf(cmd, sizeof(cmd), "AT+CIPSTART=\"%s\",\"%s\",%u", tls ? "SSL" : "TCP", host, (unsigned)port);
-  uint32_t wait = timeoutMs < 5000 ? 5000 : timeoutMs;
-  for (int attempt = 0; attempt < 2; attempt++) {
+  uint32_t wait = (timeoutMs < 5000 && !quick) ? 5000 : timeoutMs;
+  for (int attempt = 0; attempt < (quick ? 1 : 2); attempt++) {
     _closed = false;
     sendCommand(cmd);
     int rc = tcpWait(start, 3, wait, false);
     if (rc == 0) return true;
-    if (rc != 2) break;
+    if (rc != 2) {
+      if (rc < 0) { // no answer in time (quick probe of an address nobody has): drop the pending connect
+        sendCommand("AT+CIPCLOSE");
+        tcpWait(okErr, 2, 1000, false);
+      }
+      break;
+    }
     Serial.println("[MODEM] tcpOpen: a link was still open, closing it");
     sendCommand("AT+CIPCLOSE");
     tcpWait(okErr, 2, 3000, false);
   }
-  Serial.printf("[MODEM] tcpOpen %s:%u (%s) failed\n", host, (unsigned)port, tls ? "SSL" : "TCP");
+  if (!quick) Serial.printf("[MODEM] tcpOpen %s:%u (%s) failed\n", host, (unsigned)port, tls ? "SSL" : "TCP");
   _sink = nullptr;
   _closed = true;
   return false;

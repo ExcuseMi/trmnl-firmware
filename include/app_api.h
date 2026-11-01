@@ -23,10 +23,11 @@ extern "C" {
 
 #define APP_API_VERSION 2 // 2: keyboards, USB drive, Wi-Fi page (docs/apps.md "API 2")
 // Calls added to a version without a new one: an app checks api->size >= APP_API_SLOT(n + 1) before call n
-#define APP_API_MINOR 9 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
+#define APP_API_MINOR 10 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
                         // 2.4: ESP-NOW receive, touch hold; 2.5: orientation from the accelerometer;
                         // 2.6: keyboard layout, settings form; 2.7: USB pen tablet;
-                        // 2.8: other apps' files, read only; 2.9: app_launch, app_arg
+                        // 2.8: other apps' files, read only; 2.9: app_launch, app_arg;
+                        // 2.10: net_browse
 
 // ---- app header ----
 
@@ -247,6 +248,8 @@ typedef bool (*app_list_cb_t)(const char *name, bool is_dir, uint32_t size, void
 typedef bool (*app_list_ex_cb_t)(const char *name, bool is_dir, uint32_t size, int64_t mtime, void *ctx);
 
 // ---- net ----
+
+typedef void (*app_browse_cb_t)(const char *name, const char *host, uint16_t port, const char *path, void *ctx);
 
 typedef struct {
   const char *method; // "GET", "POST", ...
@@ -581,6 +584,19 @@ typedef struct app_api {
   // Copies the start argument of this app to `out` (cut to n - 1 bytes) and returns its full length: "" (0) when it was
   // started from the menu or resumed after a restart. APP_EINVAL (out NULL or n 0)
   int (*app_arg)(char *out, size_t n);
+
+  // ---- API 2.10 (api->size >= APP_API_SLOT(56)): finding services on the local network ----
+
+  // Looks for `service` ("_ipp._tcp") on the network for at most timeout_ms (0: 5000; at most 60000) and calls
+  // cb(name, host, port, path, ctx) for each one: name = the instance name ("Brother MFC-L2710DW series"), host = its
+  // IPv4 address as text, path = the TXT rp without a leading slash ("ipp/print", "" when none). At most 8, no
+  // duplicates; cb runs before the call returns, on the app's thread. Connects Wi-Fi like net_up.
+  // 2.4 GHz network: mDNS query from the S3, any service. Saved 5 GHz network: the modem has no mDNS query, so only
+  // "_ipp._tcp" works and it probes the addresses of the modem's /24 for TCP 631 nearest first, then asks each hit for
+  // printer-make-and-model (a few addresses per second: the timeout bounds how far it walks). Returns the count
+  // (0: none found), APP_EINVAL (bad service or cb NULL), APP_ENOTSUP (the modem path and another service), APP_ENONET,
+  // APP_EBUSY (ESP-NOW holds the radio), APP_ENOMEM or APP_EIO
+  int (*net_browse)(const char *service, uint32_t timeout_ms, app_browse_cb_t cb, void *ctx);
 } app_api_t;
 
 #define APP_ORIENT_SETTLE_MS 1000
@@ -617,7 +633,8 @@ APP_API_ASSERT(offsetof(app_api_t, keyboard_layout_name) == APP_API_SLOT(44), "A
 APP_API_ASSERT(offsetof(app_api_t, pen_enable) == APP_API_SLOT(48), "API 2.7: the pen after keyboard_chars");
 APP_API_ASSERT(offsetof(app_api_t, file_list_apps) == APP_API_SLOT(50), "API 2.8: other apps' files after the pen");
 APP_API_ASSERT(offsetof(app_api_t, app_launch) == APP_API_SLOT(53), "API 2.9: launching after other apps' files");
-APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(55), "API 2.9 has 55 calls: a new one raises APP_API_MINOR");
+APP_API_ASSERT(offsetof(app_api_t, net_browse) == APP_API_SLOT(55), "API 2.10: net_browse after launching");
+APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(56), "API 2.10 has 56 calls: a new one raises APP_API_MINOR");
 APP_API_ASSERT(sizeof(app_pen_event_t) == sizeof(app_event_t), "a pen event fills an app_event_t");
 APP_API_ASSERT(offsetof(app_pen_event_t, x) == 2 && offsetof(app_pen_event_t, tilt_x) == 8 &&
                    offsetof(app_pen_event_t, changed) == 11, "app_pen_event_t is part of the app ABI");
@@ -627,6 +644,6 @@ APP_API_ASSERT(sizeof(app_espnow_pkt_t) == 258, "app_espnow_pkt_t is part of the
 APP_API_ASSERT(sizeof(app_local_time_t) == 16, "app_local_time_t is part of the app ABI");
 APP_API_ASSERT(sizeof(app_setting_decl_t) == 3 * sizeof(void *) + 12 + (sizeof(void *) == 8 ? 4 : 0),
                "app_setting_decl_t is part of the app ABI");
-APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 9, "a new version adds its own size check above");
+APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 10, "a new version adds its own size check above");
 
 #endif // APP_API_H
