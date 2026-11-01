@@ -17,6 +17,10 @@ bool webshare_modem_owns_uart(void);
 // accepting the ELF files in /apps instead of an app's documents. Joins the saved network or falls back to the access
 // point; not part of the app API. webshare_status and webshare_stop work as for the writer page.
 int webshare_start_install(void);
+// The X's page (the same profile): the person asked for a test page; true once, the session then starts the Print app
+bool webshare_portal_take_test(void);
+// The device's own name ("TRMNL-X-BJRLAT", webshare_host.h): the access point's and the page's
+const char *webshare_device_name(void);
 
 // The file system root as the page's file interface (for the app runner's .bak bookkeeping)
 struct ws_fs;

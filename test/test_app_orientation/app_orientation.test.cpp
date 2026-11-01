@@ -38,8 +38,10 @@ void test_the_call_stays_in_its_slot_when_the_table_grows() {
   TEST_ASSERT_EQUAL(APP_API_SLOT(53), offsetof(app_api_t, app_launch)); // 2.9 (launching)
   TEST_ASSERT_EQUAL(APP_API_SLOT(54), offsetof(app_api_t, app_arg));
   TEST_ASSERT_EQUAL(APP_API_SLOT(55), offsetof(app_api_t, net_browse)); // 2.10 (finding printers)
-  TEST_ASSERT_EQUAL(APP_API_SLOT(56), sizeof(app_api_t));
-  TEST_ASSERT_EQUAL(10, APP_API_MINOR);
+  TEST_ASSERT_EQUAL(APP_API_SLOT(56), offsetof(app_api_t, device_setting_get)); // 2.11 (device settings)
+  TEST_ASSERT_EQUAL(APP_API_SLOT(57), offsetof(app_api_t, device_setting_set));
+  TEST_ASSERT_EQUAL(APP_API_SLOT(58), sizeof(app_api_t));
+  TEST_ASSERT_EQUAL(11, APP_API_MINOR);
 }
 
 // API 2.5: screen_orientation keeps its two values, from the accelerometer once it has a reading

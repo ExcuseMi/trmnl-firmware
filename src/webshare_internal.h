@@ -24,6 +24,7 @@ struct webshare_state_t {
 extern webshare_state_t S;
 
 extern const ws_env_t WEBSHARE_ENV; // webshare_env.cpp
+extern const ws_portal_env_t WEBSHARE_PORTAL; // webshare_portal.cpp
 
 // AsyncWebServer (webshare_async.cpp): the page's routes, and the access point's captive checks when `ap`
 void webshare_async_routes(AsyncWebServer &server, bool ap, const char *ap_url);

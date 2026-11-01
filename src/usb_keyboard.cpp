@@ -287,6 +287,7 @@ static void open_interface(hid_host_device_handle_t h) {
     return;
   }
   log_interface(h, p);
+  if (as_kbd && got_info) usb_dev_log_kind(info.VID, info.PID, "keyboard"); // the X's page, Devices
   if (as_kbd) {
     open_dev = h;
     hid_class_request_set_protocol(h, HID_REPORT_PROTOCOL_BOOT); // many start in it already: not fatal

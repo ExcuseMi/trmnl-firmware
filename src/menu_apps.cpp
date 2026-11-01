@@ -166,18 +166,21 @@ static int read_file(void *ctx, uint32_t off, void *buf, size_t len) {
   return f->seek(off) && f->read((uint8_t *)buf, len) == len ? 0 : -1;
 }
 
-void menu_apps_load(app_meta_t *metas, const char names[][32], int n) {
-  for (int i = 0; i < n; i++) {
-    char path[APPS_PATH_MAX];
-    snprintf(path, sizeof(path), APPS_DIR "/%s.elf", names[i]);
-    File f = LittleFS.open(path, "r");
-    if (f) {
-      app_meta_read(read_file, &f, (uint32_t)f.size(), names[i], &metas[i]);
-      f.close();
-    } else {
-      app_meta_read(nullptr, nullptr, 0, names[i], &metas[i]); // the name from the file's name
-    }
+bool menu_apps_meta(const char *name, app_meta_t *out) {
+  char path[APPS_PATH_MAX];
+  snprintf(path, sizeof(path), APPS_DIR "/%s.elf", name);
+  File f = LittleFS.open(path, "r");
+  if (!f) {
+    app_meta_read(nullptr, nullptr, 0, name, out); // the name from the file's name
+    return false;
   }
+  app_meta_read(read_file, &f, (uint32_t)f.size(), name, out);
+  f.close();
+  return true;
+}
+
+void menu_apps_load(app_meta_t *metas, const char names[][32], int n) {
+  for (int i = 0; i < n; i++) menu_apps_meta(names[i], &metas[i]);
 }
 
 int menu_apps_open(const menu_controls_t &controls, const app_meta_t *metas, const char names[][32], int n) {

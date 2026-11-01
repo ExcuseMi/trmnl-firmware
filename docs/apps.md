@@ -337,6 +337,28 @@ header is stale, a key is missing, or one of these values (or a `#define` of its
 | `event_log.bytes` | `EVLOG_BYTES` | 8192 | the event log's file and RAM (1 to 64 KB) |
 | `event_log.flush_gap_ms` | `EVLOG_FLUSH_GAP_MS` | 15000 | at most one event log write this often |
 
+## The X's page and device settings (API 2.11)
+
+One phone page for the whole X: Settings > "Set up on phone" (or Apps > "Install via Wi-Fi"), the same login, code and
+QR as the apps profile, on 2.4 GHz or through the modem. Routes: `lib/trmnl/src/ws_page_portal.cpp`; device side
+`src/webshare_portal.cpp`; page `src/webshare_install_page.h`.
+
+| Section | What it does |
+|---|---|
+| Apps | list with name and icon from the ELF, install/update/remove, Configure: the app's settings form while it does not run |
+| Devices | default printer (find with net_browse `_ipp._tcp`, 2.4 GHz only; Use; Test page after a confirm), Bluetooth keyboard (name, Forget), USB devices seen since the X started, pen area, mouse speed, clean-up flash |
+| This X | device name, saved Wi-Fi, firmware version, keyboard layout |
+
+| Rule | How |
+|---|---|
+| Stored declarations | `settings_declare` also writes `/xset/decl/<app>.txt` (`app_decl_store.h`) when its text differs; the page reads it back through `asf_declare`; another format version or a damaged file: "start the app once" |
+| Other apps' values | the same checks as the settings profile (`ws_settings_apply`), written to that app's NVS namespace; a secret is never sent back |
+| Changed while not running | counted in NVS `xchg`; the app gets `APP_EVENT_SETTINGS` (key = count) right after its next start |
+| Device settings | NVS `xdev`, keys and checks in `x_devset.h`: `printer` (printer.cfg text), `pen_area` fill/keep, `mouse_speed` slow/normal/fast, `cleanup_s` 0..600. Apps: `device_setting_get` / `device_setting_set` (API 2.11) |
+| Printer owner | the firmware. The Print app's old `/appdata/trmnl-print/printer.cfg` is moved in once when nothing is stored |
+| Test page | the page closes and the X starts `trmnl-print` with the argument `test` |
+| USB seen | RTC memory list (`usb_seen.h`), 8 newest; kinds from the enumeration (hub), the keyboard, mouse and pen code |
+
 ## Install via Wi-Fi (proof of concept)
 
 Menu > Apps > "Install via Wi-Fi" starts the same web server in an apps profile: home Wi-Fi first, else the access

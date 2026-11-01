@@ -8,6 +8,7 @@
 #include <usb/usb_host.h>
 #include <usb/usb_types_ch11.h>
 #include <usb_probe.h>
+#include <usb_seen.h>
 
 #include "evlog.h"
 
@@ -15,6 +16,14 @@
 #define HUB_DESC_LEN 16 // the fixed 7 bytes and the port bitmaps of a hub up to 15 ports
 
 static usb_host_client_handle_t client;
+static RTC_DATA_ATTR usb_seen_t seen; // since the X last started (deep sleep keeps it), for the X's page
+
+void usb_dev_log_kind(uint16_t vid, uint16_t pid, const char *kind) { usb_seen_add(&seen, vid, pid, 0, kind); }
+
+void usb_dev_log_seen(usb_seen_t *out) {
+  usb_seen_init(&seen);
+  *out = seen;
+}
 static uint8_t pending[PENDING], n_pending;
 static volatile bool ctrl_done;
 
@@ -78,6 +87,7 @@ static void log_device(uint8_t addr, const char *vbus) {
   if (got_info && info.parent.dev_hdl) snprintf(where, sizeof(where), "on hub port %u", info.parent.port_num);
   evlog_add("USB dev %04x:%04x class %u %s: %u mA asked, %s", got_dd ? dd->idVendor : 0, got_dd ? dd->idProduct : 0,
             got_dd ? dd->bDeviceClass : 0, where, got_cd ? usb_probe_max_ma(cd->bMaxPower) : 0, vbus);
+  if (got_dd) usb_seen_add(&seen, dd->idVendor, dd->idProduct, dd->bDeviceClass, nullptr);
   if (got_dd && dd->bDeviceClass == USB_CLASS_HUB) {
     int ports = hub_ports(dev);
     if (ports >= 0) evlog_add("USB hub found, %d ports", ports);

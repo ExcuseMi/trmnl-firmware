@@ -48,6 +48,8 @@
 #include "app_host.h"
 #include "app_net_modem.h"
 #include "app_net_browse.h"
+#include "app_settings_store.h"
+#include "x_devset_x.h"
 #include "app_settings_x.h"
 #include "kbd_layout_x.h"
 #include "displayed_image.h"
@@ -518,54 +520,13 @@ static int http_request(const app_http_request_t *req, void *buf, size_t buf_len
 
 // ---- settings ----
 
-#define APP_SETTING_MAX 256
-
-// The app's NVS namespace: "app" and a hash of its name (namespaces are at most 15 characters)
-static void settings_namespace(char *out, size_t len) {
-  uint32_t h = 2166136261u;
-  for (const char *c = app_host.name; *c; c++) h = (h ^ (uint8_t)*c) * 16777619u;
-  snprintf(out, len, "app%08lx", (unsigned long)h);
-}
-
-static bool key_ok(const char *key) { return key && key[0] && strlen(key) <= 15; }
-
-static int setting_get(const char *key, void *buf, size_t len) {
-  if (!key_ok(key) || (!buf && len)) return APP_EINVAL;
-  char ns[16];
-  settings_namespace(ns, sizeof(ns));
-  Preferences p;
-  if (!p.begin(ns, true)) return APP_ENOENT; // nothing saved yet
-  int rc = APP_ENOENT;
-  size_t stored = p.isKey(key) ? p.getBytesLength(key) : 0;
-  if (stored > 0) rc = stored > len ? APP_EINVAL : (int)p.getBytes(key, buf, len);
-  p.end();
-  return rc;
-}
-
-static int setting_set(const char *key, const void *buf, size_t len) {
-  if (!key_ok(key) || !buf || len == 0 || len > APP_SETTING_MAX) return APP_EINVAL;
-  char ns[16];
-  settings_namespace(ns, sizeof(ns));
-  Preferences p;
-  if (!p.begin(ns, false)) return APP_EIO;
-  int rc = p.putBytes(key, buf, len) == len ? 0 : APP_EIO;
-  p.end();
-  return rc;
-}
+// The app's own settings: app_settings_store.cpp, by the running app's name
+static int setting_get(const char *key, void *buf, size_t len) { return app_store_get(app_host.name, key, buf, len); }
+static int setting_set(const char *key, const void *buf, size_t len) { return app_store_set(app_host.name, key, buf, len); }
 
 int app_host_setting_get(const char *key, void *buf, size_t len) { return setting_get(key, buf, len); }
 int app_host_setting_set(const char *key, const void *buf, size_t len) { return setting_set(key, buf, len); }
-
-int app_host_setting_remove(const char *key) {
-  if (!key_ok(key)) return APP_EINVAL;
-  char ns[16];
-  settings_namespace(ns, sizeof(ns));
-  Preferences p;
-  if (!p.begin(ns, false)) return APP_EIO;
-  if (p.isKey(key)) p.remove(key);
-  p.end();
-  return 0;
-}
+int app_host_setting_remove(const char *key) { return app_store_remove(app_host.name, key); }
 
 // TRMNL's from its last image; the panel's own frame is landscape (bbep keeps rotation 0 while an app runs)
 static int image_orientation(void) {
@@ -691,6 +652,7 @@ static const app_api_t table = {
     file_open_app,
     app_launch_call, app_arg_call,
     net_browse,
+    x_devset_get,    x_devset_set,
 };
 
 const app_api_t *app_api_table(void) {

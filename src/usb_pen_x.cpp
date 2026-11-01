@@ -1,6 +1,7 @@
 // A USB pen tablet for apps (usb_pen_x.h): the X's side of lib/trmnl usb_pen.h
 #ifdef BOARD_TRMNL_X
 
+#include "usb_dev_log.h"
 #include "usb_pen_x.h"
 
 #include <Arduino.h>
@@ -100,6 +101,7 @@ bool usb_pen_x_waiting(void) {
 }
 
 void usb_pen_x_attach(uint16_t vid, uint16_t pid) {
+  usb_dev_log_kind(vid, pid, "pen tablet");
   taskENTER_CRITICAL(&mux);
   cursor_check();
   if (!present || pen.vid != vid || pen.pid != pid) usb_pen_init(&pen, vid, pid);
@@ -154,6 +156,7 @@ void usb_pen_x_report(usb_pen_iface_t role, const uint8_t *d, size_t len) {
 }
 
 void usb_pen_x_mouse_attach(uint16_t vid, uint16_t pid) {
+  usb_dev_log_kind(vid, pid, "mouse");
   usb_cursor_out_t o;
   taskENTER_CRITICAL(&mux);
   cursor_check();

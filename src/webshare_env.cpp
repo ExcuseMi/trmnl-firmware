@@ -75,7 +75,7 @@ const ws_env_t WEBSHARE_ENV = {
     now_ms,      rnd,         lock,        unlock,          page,      WEBSHARE_KBD_JS, log_line,
     ev_line,     kbd_layout_x_current,     kbd_layout_x_store,     touch_inject_button,  app_settings_x_copy,
     setting_get, setting_set, app_host_setting_remove, app_settings_x_changed, big_alloc, big_free,
-    big_largest, note_get,    note_remove,
+    big_largest, note_get,    note_remove, &WEBSHARE_PORTAL,
 };
 
 #endif // BOARD_TRMNL_X

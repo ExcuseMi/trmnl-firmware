@@ -39,6 +39,11 @@ static void make_dev_names(void) {
   ws_host_names(getWifiClientHostname().c_str(), WIFI_CLIENT_HOSTNAME_PREFIX, mac, dev_ssid, dev_host);
 }
 
+const char *webshare_device_name(void) {
+  if (!dev_ssid[0]) make_dev_names();
+  return dev_ssid;
+}
+
 // ---- LittleFS under the app's folder ----
 
 static char base_dir[48]; // the writer's folder; the install profile uses the root (ctx "")

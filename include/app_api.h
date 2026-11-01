@@ -23,11 +23,11 @@ extern "C" {
 
 #define APP_API_VERSION 2 // 2: keyboards, USB drive, Wi-Fi page (docs/apps.md "API 2")
 // Calls added to a version without a new one: an app checks api->size >= APP_API_SLOT(n + 1) before call n
-#define APP_API_MINOR 10 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
+#define APP_API_MINOR 11 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
                         // 2.4: ESP-NOW receive, touch hold; 2.5: orientation from the accelerometer;
                         // 2.6: keyboard layout, settings form; 2.7: USB pen tablet;
                         // 2.8: other apps' files, read only; 2.9: app_launch, app_arg;
-                        // 2.10: net_browse
+                        // 2.10: net_browse; 2.11: device settings
 
 // ---- app header ----
 
@@ -609,6 +609,18 @@ typedef struct app_api {
   // (0: none found), APP_EINVAL (bad service or cb NULL), APP_ENOTSUP (the modem path and another service), APP_ENONET,
   // APP_EBUSY (ESP-NOW holds the radio), APP_ENOMEM or APP_EIO
   int (*net_browse)(const char *service, uint32_t timeout_ms, app_browse_cb_t cb, void *ctx);
+
+  // ---- API 2.11 (api->size >= APP_API_SLOT(58)): the X's device settings (docs/apps.md "Device settings") ----
+
+  // The X's own setting `key` into buf (NUL-terminated), the default when none is stored: "printer" (the default
+  // printer, the Print app's printer.cfg text: name=, host=, port=, path=, format= lines), "pen_area" (fill|keep),
+  // "mouse_speed" (slow|normal|fast), "cleanup_s" (idle seconds before a clean-up flash, 0 off). The person sets them
+  // once on the X's page (Devices). Returns the length, APP_ENOENT (unknown key, or no printer yet) or APP_EINVAL
+  // (buf NULL or too small: the printer needs up to 513 bytes)
+  int (*device_setting_get)(const char *key, char *buf, size_t cap);
+  // Writes one, with the page's checks (for an app's own setup on the X, like Print's): 0, APP_ENOENT (unknown key),
+  // APP_EINVAL (a value the checks refuse; len 0 restores the default) or APP_EIO
+  int (*device_setting_set)(const char *key, const char *value, size_t len);
 } app_api_t;
 
 #define APP_ORIENT_SETTLE_MS 1000
@@ -646,7 +658,8 @@ APP_API_ASSERT(offsetof(app_api_t, pen_enable) == APP_API_SLOT(48), "API 2.7: th
 APP_API_ASSERT(offsetof(app_api_t, file_list_apps) == APP_API_SLOT(50), "API 2.8: other apps' files after the pen");
 APP_API_ASSERT(offsetof(app_api_t, app_launch) == APP_API_SLOT(53), "API 2.9: launching after other apps' files");
 APP_API_ASSERT(offsetof(app_api_t, net_browse) == APP_API_SLOT(55), "API 2.10: net_browse after launching");
-APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(56), "API 2.10 has 56 calls: a new one raises APP_API_MINOR");
+APP_API_ASSERT(offsetof(app_api_t, device_setting_set) == APP_API_SLOT(57), "API 2.11: device settings after net_browse");
+APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(58), "API 2.11 has 58 calls: a new one raises APP_API_MINOR");
 APP_API_ASSERT(sizeof(app_pen_event_t) == sizeof(app_event_t), "a pen event fills an app_event_t");
 APP_API_ASSERT(offsetof(app_pen_event_t, x) == 2 && offsetof(app_pen_event_t, tilt_x) == 8 &&
                    offsetof(app_pen_event_t, changed) == 11, "app_pen_event_t is part of the app ABI");
@@ -656,6 +669,6 @@ APP_API_ASSERT(sizeof(app_espnow_pkt_t) == 258, "app_espnow_pkt_t is part of the
 APP_API_ASSERT(sizeof(app_local_time_t) == 16, "app_local_time_t is part of the app ABI");
 APP_API_ASSERT(sizeof(app_setting_decl_t) == 3 * sizeof(void *) + 12 + (sizeof(void *) == 8 ? 4 : 0),
                "app_setting_decl_t is part of the app ABI");
-APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 10, "a new version adds its own size check above");
+APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 11, "a new version adds its own size check above");
 
 #endif // APP_API_H

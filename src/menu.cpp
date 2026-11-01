@@ -247,6 +247,7 @@ static const special_menu_item_t special_menu_items[] = {
 
 // The Settings submenu; Back goes to the main menu
 enum settings_menu_item_t {
+  SETTINGS_MENU_PHONE, // the X's page: apps, devices, this X
   SETTINGS_MENU_DIAGNOSTICS,
   SETTINGS_MENU_RESET_WIFI,
   SETTINGS_MENU_SHUT_DOWN,
@@ -255,6 +256,7 @@ enum settings_menu_item_t {
 };
 
 static const char *const settings_menu_labels[SETTINGS_MENU_COUNT] = {
+    "Set up on phone",
     "Diagnostics...",
     "Reset Wi-Fi...",
     "Shut Down...",
@@ -621,6 +623,8 @@ static menu_outcome_t run_menu_screens(SPECIAL_FUNCTION *function) {
     case MENU_SCREEN_SETTINGS: {
       int item = run_menu_screen(settings_menu_labels, SETTINGS_MENU_COUNT, true);
       switch (item) {
+      case SETTINGS_MENU_PHONE:
+        return MENU_OUTCOME_INSTALL;
       case SETTINGS_MENU_DIAGNOSTICS:
         screen = MENU_SCREEN_DIAGNOSTICS;
         break;

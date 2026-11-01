@@ -31,6 +31,7 @@
 #include <algorithm>
 
 #include "app_host.h"
+#include "app_settings_store.h"
 #include "ble_keyboard.h"
 #include "evlog.h"
 #include "espnow_app.h"
@@ -311,6 +312,7 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   kbd_layout_x_current(); // read from NVS here, before a keyboard task needs it
   app_host.key_chars = false; // HID usages until the app asks for characters (keyboard_chars)
   app_settings_x_end(); // no form from the app before
+  app_store_started(app_host.name); // values the phone page changed while it did not run: APP_EVENT_SETTINGS
   app_serial_init(&serial_in);
   Serial.begin(115200); // the keys of a terminal on the USB serial port
   touchbar_input_begin(app_host.name); // the tap that started it is not the app's
@@ -456,7 +458,7 @@ void apps_install_session(void) {
   bbep.fillScreen(BBEP_WHITE);
   bbep.setTextColor(BBEP_BLACK, BBEP_WHITE);
   // Everything below is drawn from y = 70 on (below the scratch area, whose rows are still read while drawing): the scratch area of draw_big is the top left corner
-  draw_big("Install apps via Wi-Fi", mid, 70, 2, true, Roboto_Black_24);
+  draw_big("Set up on phone", mid, 70, 2, true, Roboto_Black_24);
   char line[96];
   int y = 180;
   if (st.mode != APP_WEBSHARE_HOME) {
@@ -482,9 +484,14 @@ void apps_install_session(void) {
   app_sleep_gate_screen("Install via Wi-Fi");
   Log_info("Apps: install screen shown, a long press stops it");
   touchbar_input_begin("Install via Wi-Fi");
+  bool test_page = false;
   while (true) {
     delay(APP_POLL_MS * 5);
     if (pump_touch()) break;
+    if (webshare_portal_take_test()) { // Devices > Printer > test page: the Print app prints it
+      test_page = true;
+      break;
+    }
     webshare_status(&st);
     if (!st.running) { // idle for 15 minutes, or too many wrong codes
       evlog_add("Apps: install page stopped by itself (idle or locked out)");
@@ -494,11 +501,15 @@ void apps_install_session(void) {
   touchbar_input_end();
   app_sleep_gate_screen(nullptr);
   webshare_stop();
+  if (test_page) apps_run_arg(APPS_DIR "/trmnl-print.elf", "test"); // does not return
   show_last_image_and_sleep();
 }
 
-void apps_run(const char *path) {
+void apps_run(const char *path) { apps_run_arg(path, ""); }
+
+void apps_run_arg(const char *path, const char *first_arg) {
   char next[APPS_PATH_MAX], next_app[32], arg[APP_LAUNCH_ARG_MAX + 1] = "";
+  snprintf(arg, sizeof(arg), "%s", first_arg ? first_arg : "");
   while (apps_run_once(path, arg, next_app, sizeof(next_app), arg, sizeof(arg))) {
     snprintf(next, sizeof(next), APPS_DIR "/%s.elf", next_app);
     path = next;

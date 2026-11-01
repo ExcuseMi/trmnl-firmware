@@ -25,6 +25,8 @@ typedef int (*menu_apps_choose_t)(const char *const *labels, int count, const ch
 
 // Reads the display names and icons of the apps in names[] (file names, without .elf) from /apps
 void menu_apps_load(app_meta_t *metas, const char names[][32], int n);
+// One app's name and icon from /apps/<name>.elf (the X's page too); false when there is no such file
+bool menu_apps_meta(const char *name, app_meta_t *out);
 
 // "Open an app": the grid, most recently used first. Returns the app's index in names[] (and remembers it as the most
 // recent), MENU_APPS_BACK or MENU_APPS_TIMEOUT.

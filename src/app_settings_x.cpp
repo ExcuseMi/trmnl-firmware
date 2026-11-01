@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "app_host.h"
+#include "app_settings_store.h"
 #include "app_settings_x.h"
 
 static asf_form_t *form; // PSRAM, allocated at the first declare and kept (no free while the page may read)
@@ -26,8 +27,13 @@ static bool ready(void) {
 
 int app_settings_x_declare(const app_setting_decl_t *decls, uint32_t n) {
   if (!ready()) return APP_ENOMEM;
-  form_lock l;
-  return asf_declare(form, decls, n);
+  int rc;
+  {
+    form_lock l;
+    rc = asf_declare(form, decls, n);
+  }
+  if (rc == 0) app_store_decl_save(app_host.name, form); // the phone page shows it while the app does not run
+  return rc;
 }
 
 bool app_settings_x_declared(void) {

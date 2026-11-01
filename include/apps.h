@@ -22,6 +22,8 @@ int apps_receive(bool (*cancel)(void));
 // Loads and runs the app at `path`, then goes back to TRMNL. Does not return: it sleeps, or
 // restarts when the app does not end within APP_EXIT_GRACE_MS of a long press.
 void apps_run(const char *path);
+// The same with a start argument for the app (app_arg), as app_launch gives one
+void apps_run_arg(const char *path, const char *arg);
 
 // The menu's "Install via Wi-Fi": starts the Wi-Fi page in its apps profile, shows where it is, the code and a QR of
 // the one-time login link, until a long press (or 15 min idle). Then back to TRMNL; does not return.
