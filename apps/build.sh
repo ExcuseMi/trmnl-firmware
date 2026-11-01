@@ -17,8 +17,14 @@ mkdir -p "$out"
 # What the X's loader resolves: elf_loader's export table plus src/app_heap.cpp's allocators
 symtab=$here/../managed_components/espressif__elf_loader/src/esp_elf_symbol.c
 [ -f "$symtab" ] || { echo "no $symtab: run pio run -e TRMNL_X once" >&2; exit 1; }
-allowed=$(mktemp)
-trap 'rm -f "$allowed"' EXIT
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+allowed=$tmp/allowed
+# libgcc without .eh_frame: for -shared, ld 2.43.1 grows a CIE's augmentation in .eh_frame inside a buffer sized for
+# the old section (heap overflow of 2-4 bytes, valgrind), and then aborts with "double free or corruption" or a
+# segfault for some output paths only. The 64-bit division members (_udivdi3.o and friends) carry one; the apps
+# never unwind. apps/test_build_paths.sh is the guard.
+"$tc/xtensa-esp32s3-elf-objcopy" --remove-section=.eh_frame "$("$cc" -print-libgcc-file-name)" "$tmp/libgcc.a"
 { sed -n 's/.*ESP_ELFSYM_EXPORT(\([A-Za-z0-9_]*\)).*/\1/p' "$symtab"; printf 'malloc\ncalloc\nrealloc\n'; } > "$allowed"
 # every folder with C sources, but build/ and common/ (not __pycache__ and such)
 apps=${*:-$(cd "$here" && for d in */; do d=${d%/}; ls "$d"/*.c >/dev/null 2>&1 && echo "$d"; done |
@@ -41,7 +47,13 @@ for app in $apps; do
     -nostartfiles -nostdlib -fPIC -shared -e app_main -fdata-sections -ffunction-sections \
     -Wl,--gc-sections -Wl,--undefined=app_info -Wl,--undefined=app_rodata_align $icon -fvisibility=hidden \
     -Wl,--strip-all -Wl,--strip-debug \
-    "$dir"/*.c $extra -o "$out/$name.elf" -lgcc
+    "$dir"/*.c $extra -o "$out/$name.elf" "$tmp/libgcc.a"
+  # Any other input with unwind tables would meet the same ld bug: refuse it rather than ship a lucky link
+  if "$tc/xtensa-esp32s3-elf-objdump" -h "$out/$name.elf" | grep -q '[.]eh_frame'; then
+    rm -f "$out/$name.elf"
+    echo "$name: an input has .eh_frame (ld 2.43.1 corrupts its heap growing it): build without unwind tables" >&2
+    exit 1
+  fi
   "$strip" --strip-unneeded --remove-section=.comment --remove-section=.got.loc --remove-section=.dynamic \
     --remove-section=.xt.lit --remove-section=.xt.prop --remove-section=.xtensa.info "$out/$name.elf"
   # Every import must be in the loader's table, else the X refuses the app at start ("needs a function the
