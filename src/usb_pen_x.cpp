@@ -17,6 +17,15 @@ static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 static usb_pen_t pen; // under mux
 static usb_pen_queue_t queue; // under mux
 static bool present; // under mux: a tablet is attached
+static usb_mouse_t mouse; // under mux
+static bool mouse_present; // under mux
+static uint16_t mouse_vid, mouse_pid; // under mux
+// the X's panel (docs/spec/usb-display.md): the mouse moves the same distance on screen in x and y; micrometres only
+// give pen_info the aspect
+#define PANEL_W    1872
+#define PANEL_H    1404
+#define PANEL_UM_W 209664
+#define PANEL_UM_H 157248
 static volatile bool wanted;
 static volatile bool token_pending; // an APP_EVENT_PEN token sits in the app's queue
 
@@ -32,8 +41,15 @@ static void post_token(void) {
 int usb_pen_x_enable(bool on) {
   taskENTER_CRITICAL(&mux);
   usb_pen_queue_init(&queue);
+  bool hover = false;
+  if (on && mouse_present && !present) { // a mouse already there: in range at once
+    app_pen_event_t e;
+    hover = usb_mouse_enter(&mouse, &e) != 0;
+    usb_pen_queue_push(&queue, &e);
+  }
   taskEXIT_CRITICAL(&mux);
   wanted = on;
+  if (hover) post_token();
   return usb_keyboard_pen(on);
 }
 
@@ -42,7 +58,8 @@ bool usb_pen_x_wanted(void) { return wanted; }
 int usb_pen_x_info(app_pen_info_t *out) {
   if (!out) return APP_EINVAL;
   taskENTER_CRITICAL(&mux);
-  usb_pen_info(present ? &pen : nullptr, out);
+  if (present || !mouse_present) usb_pen_info(present ? &pen : nullptr, out);
+  else usb_mouse_info(mouse_vid, mouse_pid, PANEL_UM_W, PANEL_UM_H, out);
   out->dropped = queue.dropped;
   taskEXIT_CRITICAL(&mux);
   return 0;
@@ -70,9 +87,13 @@ bool usb_pen_x_waiting(void) {
 
 void usb_pen_x_attach(uint16_t vid, uint16_t pid) {
   taskENTER_CRITICAL(&mux);
+  app_pen_event_t gone;
+  bool mouse_off = !present && mouse_present && wanted && usb_mouse_leave(&mouse, &gone); // the tablet wins
+  if (mouse_off) usb_pen_queue_push(&queue, &gone);
   if (!present || pen.vid != vid || pen.pid != pid) usb_pen_init(&pen, vid, pid);
   present = true;
   taskEXIT_CRITICAL(&mux);
+  if (mouse_off) post_token();
 }
 
 void usb_pen_x_detach(void) {
@@ -94,8 +115,11 @@ void usb_pen_x_detach(void) {
       if (wanted) usb_pen_queue_push(&queue, &up);
     }
   }
+  app_pen_event_t back; // a mouse still attached comes back in range
+  bool mouse_on = had && mouse_present && wanted && usb_mouse_enter(&mouse, &back);
+  if (mouse_on) usb_pen_queue_push(&queue, &back);
   taskEXIT_CRITICAL(&mux);
-  if (post && wanted) post_token();
+  if ((post || mouse_on) && wanted) post_token();
   // the largest raw values seen: checks the assumed full-mode maxima (usb_pen.h)
   if (had)
     evlog_add("Pen %04x:%04x gone, %lu pen frames, raw max x %u y %u p %u", was.vid, was.pid,
@@ -106,6 +130,44 @@ void usb_pen_x_report(usb_pen_iface_t role, const uint8_t *d, size_t len) {
   app_pen_event_t e;
   taskENTER_CRITICAL(&mux);
   int n = usb_pen_report(&pen, role, d, len, &e);
+  if (n && wanted) usb_pen_queue_push(&queue, &e);
+  taskEXIT_CRITICAL(&mux);
+  if (n && wanted) {
+    app_host.got_input = true;
+    post_token();
+  }
+}
+
+void usb_pen_x_mouse_attach(uint16_t vid, uint16_t pid) {
+  taskENTER_CRITICAL(&mux);
+  usb_mouse_init(&mouse, PANEL_W, PANEL_H);
+  mouse_present = true;
+  mouse_vid = vid;
+  mouse_pid = pid;
+  app_pen_event_t e;
+  bool on = wanted && !present && usb_mouse_enter(&mouse, &e);
+  if (on) usb_pen_queue_push(&queue, &e);
+  taskEXIT_CRITICAL(&mux);
+  if (on) post_token();
+}
+
+void usb_pen_x_mouse_detach(void) {
+  taskENTER_CRITICAL(&mux);
+  app_pen_event_t e;
+  bool off = mouse_present && wanted && !present && usb_mouse_leave(&mouse, &e); // nothing stays down
+  mouse_present = false;
+  if (off) usb_pen_queue_push(&queue, &e);
+  mouse.flags = 0;
+  taskEXIT_CRITICAL(&mux);
+  if (off) post_token();
+}
+
+void usb_pen_x_mouse_report(const usb_mouse_layout_t *l, const uint8_t *d, size_t len) {
+  usb_mouse_move_t mv;
+  if (!wanted || !usb_mouse_report(l, d, len, &mv)) return; // no mouse events for an app that did not ask
+  app_pen_event_t e;
+  taskENTER_CRITICAL(&mux);
+  int n = mouse_present && !present ? usb_mouse_move(&mouse, &mv, &e) : 0; // a tablet wins
   if (n && wanted) usb_pen_queue_push(&queue, &e);
   taskEXIT_CRITICAL(&mux);
   if (n && wanted) {

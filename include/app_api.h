@@ -216,6 +216,7 @@ typedef union {
 #define APP_PEN_MODE_NONE 0 // no tablet
 #define APP_PEN_MODE_FULL 1 // XP-Pen full mode: pen, pressure, tilt and the tablet's buttons
 #define APP_PEN_MODE_STANDARD 2 // the tablet's standard report: pen, pressure, tilt; no tablet buttons
+#define APP_PEN_MODE_MOUSE 3 // a USB mouse: left button the tip (pressure fixed), right BARREL, middle BARREL2; no tilt, no keys
 
 typedef struct {
   uint16_t vid, pid; // the tablet's USB ids, 0 0 when none

@@ -11,6 +11,7 @@
 #include <trmnl_log.h>
 #include <usb/hid_host.h>
 #include <usb/usb_host.h>
+#include <usb_mouse.h>
 #include <usb_probe.h>
 
 #include "app_host.h"
@@ -38,11 +39,20 @@ static hid_keys_t keys;
 typedef struct {
   hid_host_device_handle_t h; // nullptr: free
   uint8_t iface;
-  usb_pen_iface_t pen; // USB_PEN_IFACE_NONE: the probe
+  usb_pen_iface_t pen; // USB_PEN_IFACE_NONE: the probe or a mouse
+  bool mouse; // a mouse: its reports draw as the pen (usb_pen_x.h)
+  usb_mouse_layout_t ml; // the mouse's report layout
   usb_probe_t pr;
 } probe_slot_t;
 static uint8_t pen_mode_logged; // APP_PEN_MODE_* already in the event log for the tablet now on
 static probe_slot_t probes[PROBE_SLOTS];
+
+static bool mouse_open(void) {
+  for (const probe_slot_t &ps : probes) {
+    if (ps.h && ps.mouse) return true;
+  }
+  return false;
+}
 
 typedef struct {
   uint8_t len;
@@ -90,7 +100,11 @@ static void iface_cb(hid_host_device_handle_t h, const hid_host_interface_event_
     size_t n = 0;
     if (hid_host_device_get_raw_input_report_data(h, d, sizeof(d), &n) != ESP_OK) break;
     bool pen = ps && ps->pen != USB_PEN_IFACE_NONE;
-    if (pen) usb_pen_x_report(ps->pen, d, n); // parsed here: 200 reports a second, not through the port task
+    if (ps && ps->mouse) {
+      usb_pen_x_mouse_report(&ps->ml, d, n);
+      pen = true; // counted and logged like a tablet's
+    }
+    if (ps && ps->pen != USB_PEN_IFACE_NONE) usb_pen_x_report(ps->pen, d, n); // parsed here: 200 reports a second, not through the port task
     r.len = (uint8_t)(n < sizeof(r.data) ? n : sizeof(r.data));
     memcpy(r.data, d, r.len);
     if (ps) {
@@ -183,6 +197,7 @@ static bool host_stop(uint32_t deadline) {
   }
   keyboard_open = false;
   bool had_pen = false;
+  bool had_mouse = mouse_open();
   for (probe_slot_t &ps : probes) {
     if (ps.h) hid_host_device_close(ps.h);
     if (ps.h && ps.pen != USB_PEN_IFACE_NONE) {
@@ -192,6 +207,7 @@ static bool host_stop(uint32_t deadline) {
     ps.h = nullptr;
   }
   if (had_pen) usb_pen_x_detach();
+  if (had_mouse) usb_pen_x_mouse_detach();
   while (hid_host_uninstall() != ESP_OK) { // a device still listed: its removal (boost off) takes a moment
     if ((int32_t)(millis() - deadline) >= 0) return false;
     delay(20);
@@ -277,8 +293,26 @@ static void open_interface(hid_host_device_handle_t h) {
   } else {
     ps->iface = p.iface_num;
     ps->pen = pen;
+    ps->mouse = false;
+    if (pen == USB_PEN_IFACE_NONE) { // a mouse: a boot one in boot protocol, else one whose descriptor holds a mouse
+      size_t dlen = 0;
+      const uint8_t *desc = hid_host_get_report_descriptor(h, &dlen);
+      if (p.sub_class == HID_SUBCLASS_BOOT_INTERFACE && p.proto == HID_PROTOCOL_MOUSE) {
+        usb_mouse_boot_layout(&ps->ml);
+        ps->mouse = true;
+      } else if (desc && usb_mouse_map_parse(desc, dlen, &ps->ml)) {
+        ps->mouse = true;
+      }
+    }
     usb_probe_init(&ps->pr, millis());
-    hid_class_request_set_protocol(h, HID_REPORT_PROTOCOL_REPORT); // not fatal
+    hid_class_request_set_protocol(h, ps->mouse && ps->ml.report_id == 0 && p.sub_class == HID_SUBCLASS_BOOT_INTERFACE
+                                          ? HID_REPORT_PROTOCOL_BOOT
+                                          : HID_REPORT_PROTOCOL_REPORT); // not fatal
+    if (ps->mouse) {
+      evlog_add("Mouse %04x:%04x i%u: %s", got_info ? info.VID : 0, got_info ? info.PID : 0, p.iface_num,
+                p.sub_class == HID_SUBCLASS_BOOT_INTERFACE ? "boot protocol" : "report protocol");
+      usb_pen_x_mouse_attach(got_info ? info.VID : 0, got_info ? info.PID : 0);
+    }
     if (pen != USB_PEN_IFACE_NONE) {
       if (!pen_open()) pen_mode_logged = APP_PEN_MODE_NONE;
       usb_pen_x_attach(info.VID, info.PID);
@@ -304,6 +338,10 @@ static void open_interface(hid_host_device_handle_t h) {
     if (ps) {
       ps->h = nullptr;
       if (pen != USB_PEN_IFACE_NONE && !pen_open()) usb_pen_x_detach();
+      if (ps->mouse) {
+        ps->mouse = false;
+        if (!mouse_open()) usb_pen_x_mouse_detach();
+      }
     } else {
       open_dev = nullptr;
     }
@@ -320,7 +358,7 @@ static void drain_reports(void) {
   app_event_t ev[HID_KEYS_MAX_EVENTS];
   for (probe_slot_t &ps : probes) {
     uint32_t n;
-    if (ps.h && ps.pen == USB_PEN_IFACE_NONE && usb_probe_summary(&ps.pr, millis(), &n)) // a tablet's: at removal
+    if (ps.h && ps.pen == USB_PEN_IFACE_NONE && !ps.mouse && usb_probe_summary(&ps.pr, millis(), &n)) // a tablet's: at removal
       evlog_add("HID i%u: %lu reports", ps.iface, (unsigned long)n);
   }
   uint8_t mode = usb_pen_x_mode();
@@ -336,6 +374,10 @@ static void drain_reports(void) {
       if (r.gone && ps.pen != USB_PEN_IFACE_NONE) {
         log_pen_gone(ps);
         if (!pen_open()) usb_pen_x_detach(); // its last interface
+      } else if (r.gone && ps.mouse) {
+        evlog_add("Mouse i%u gone after %lu reports", ps.iface, (unsigned long)ps.pr.total);
+        ps.mouse = false;
+        if (!mouse_open()) usb_pen_x_mouse_detach();
       } else if (r.gone) {
         evlog_add("HID i%u gone after %lu reports", ps.iface, (unsigned long)ps.pr.total);
       } else {
@@ -386,7 +428,7 @@ static void port_loop(void *arg) {
     }
     last_power = read_power();
     usb_port_input_t in = {(wanted || pen_wanted) && !stop_task, last_power,
-                           keyboard_open || (pen_wanted && pen_open()), usb_port_role() == USB_ROLE_DRIVE};
+                           keyboard_open || (pen_wanted && (pen_open() || mouse_open())), usb_port_role() == USB_ROLE_DRIVE};
     usb_port_mode_t mode = usb_port_step(&port, millis(), &in);
     if (port.why != why) {
       why = port.why;
