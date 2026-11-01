@@ -23,9 +23,9 @@ extern "C" {
 
 #define APP_API_VERSION 2 // 2: keyboards, USB drive, Wi-Fi page (docs/apps.md "API 2")
 // Calls added to a version without a new one: an app checks api->size >= APP_API_SLOT(n + 1) before call n
-#define APP_API_MINOR 6 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
+#define APP_API_MINOR 7 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
                         // 2.4: ESP-NOW receive, touch hold; 2.5: orientation from the accelerometer;
-                        // 2.6: keyboard layout, settings form
+                        // 2.6: keyboard layout, settings form; 2.7: USB pen tablet
 
 // ---- app header ----
 
@@ -126,6 +126,8 @@ typedef enum {
   APP_EVENT_KEYBOARD, // a keyboard came or went: `key` holds the APP_KBD_* bits connected now (API 2)
   APP_EVENT_ORIENTATION, // API 2.5, only after orientation_follow(true, ..): the X was turned, `key` is the new APP_ORIENT_*
   APP_EVENT_SETTINGS, // API 2.6: the phone saved the settings form; `key` is how many values changed (read them again)
+  APP_EVENT_PEN, // API 2.7, only after pen_enable(1): the pen moved or its flags changed (app_pen_event_t below)
+  APP_EVENT_PEN_KEY, // API 2.7, only after pen_enable(1): a tablet button went down or up (app_pen_event_t below)
 } app_event_type_t;
 
 #define APP_EXIT_GRACE_MS 2000
@@ -186,6 +188,42 @@ typedef struct {
   // as APP_KEY_HID. hid_usage is always there for apps that want key positions (API 2)
   uint8_t hid_usage;
 } app_event_t;
+
+// ---- pen tablet (API 2.7, docs/apps.md "Pen tablet") ----
+
+// APP_EVENT_PEN and APP_EVENT_PEN_KEY fill the same 12 bytes in this layout: read them through app_any_event_t
+#define APP_PEN_TIP 0x01 // the tip touches the tablet
+#define APP_PEN_IN_RANGE 0x02 // the pen is over the tablet (hover or tip); off: it left, x and y are the last place
+#define APP_PEN_BARREL 0x04 // the pen's lower button
+#define APP_PEN_BARREL2 0x08 // the pen's upper button
+
+typedef struct {
+  uint8_t type; // APP_EVENT_PEN or APP_EVENT_PEN_KEY
+  uint8_t flags; // APP_PEN_* now
+  uint16_t x, y; // 0..65535 over the tablet's area, 0 0 the top left corner (pen_info: width_um, height_um)
+  uint16_t pressure; // 0..65535 (0: not pressed)
+  int8_t tilt_x, tilt_y; // degrees, 0 0 upright; 0 when the tablet does not tell
+  uint8_t keys; // the tablet's buttons down now, bit 0 .. bit 7 in the tablet's own order
+  uint8_t changed; // PEN: the APP_PEN_* bits that changed (0: a move); PEN_KEY: the `keys` bits that changed
+} app_pen_event_t;
+
+typedef union {
+  app_event_t ev; // what input_poll fills: input_poll(&u.ev, ..), then u.pen when u.ev.type is PEN or PEN_KEY
+  app_pen_event_t pen;
+} app_any_event_t;
+
+#define APP_PEN_MODE_NONE 0 // no tablet
+#define APP_PEN_MODE_FULL 1 // XP-Pen full mode: pen, pressure, tilt and the tablet's buttons
+#define APP_PEN_MODE_STANDARD 2 // the tablet's standard report: pen, pressure, tilt; no tablet buttons
+
+typedef struct {
+  uint16_t vid, pid; // the tablet's USB ids, 0 0 when none
+  uint8_t mode; // APP_PEN_MODE_*
+  uint8_t key_count; // tablet buttons that can come as PEN_KEY (8 on the Deco 01 V2 in full mode, else 0)
+  uint16_t reserved;
+  uint32_t width_um, height_um; // the active area in micrometres (its aspect ratio), 0 0 unknown
+  uint32_t dropped; // pen events not delivered since pen_enable (the app did not read; moves are merged first)
+} app_pen_info_t;
 
 #define APP_KBD_USB 0x01 // a USB keyboard on the X's port (needs an OTG adapter; the X powers it)
 #define APP_KBD_BLE 0x02 // a Bluetooth LE keyboard
@@ -503,6 +541,16 @@ typedef struct app_api {
   // 1: a USB or Bluetooth key with a character on the X's layout comes as APP_KEY_CHAR with utf8 (hid_usage kept);
   // 0 (the default at every start): APP_KEY_HID as in API 2.0, for an app with its own layouts. Check SLOT(48) first
   int (*keyboard_chars)(int on);
+
+  // ---- API 2.7 (api->size >= APP_API_SLOT(50)) ----
+
+  // 1: a USB pen tablet's data comes as APP_EVENT_PEN and APP_EVENT_PEN_KEY (docs/apps.md "Pen tablet"); this also
+  // asks for USB host mode as keyboard_enable(APP_KBD_USB) does (the same port rules). 0 (the default at every start):
+  // nothing from a tablet. A tablet never types keys. Moves the app has not read yet are merged into the latest; tip,
+  // range, pen button and tablet button changes are always kept. Returns 0 or APP_ENOMEM
+  int (*pen_enable)(int on);
+  // Fills *out with the tablet connected now (vid 0: none). 0, or APP_EINVAL (out NULL)
+  int (*pen_info)(app_pen_info_t *out);
 } app_api_t;
 
 #define APP_ORIENT_SETTLE_MS 1000
@@ -536,12 +584,17 @@ APP_API_ASSERT(offsetof(app_api_t, espnow_start) == APP_API_SLOT(37), "API 2.4: 
 APP_API_ASSERT(offsetof(app_api_t, touch_hold) == APP_API_SLOT(40), "API 2.4: then the touch hold");
 APP_API_ASSERT(offsetof(app_api_t, device_orientation) == APP_API_SLOT(41), "API 2.5: orientation after the touch hold");
 APP_API_ASSERT(offsetof(app_api_t, keyboard_layout_name) == APP_API_SLOT(44), "API 2.6: layout after touchbar_layout");
-APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(48), "API 2.6 has 48 calls: a new one raises APP_API_MINOR");
+APP_API_ASSERT(offsetof(app_api_t, pen_enable) == APP_API_SLOT(48), "API 2.7: the pen after keyboard_chars");
+APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(50), "API 2.7 has 50 calls: a new one raises APP_API_MINOR");
+APP_API_ASSERT(sizeof(app_pen_event_t) == sizeof(app_event_t), "a pen event fills an app_event_t");
+APP_API_ASSERT(offsetof(app_pen_event_t, x) == 2 && offsetof(app_pen_event_t, tilt_x) == 8 &&
+                   offsetof(app_pen_event_t, changed) == 11, "app_pen_event_t is part of the app ABI");
+APP_API_ASSERT(sizeof(app_pen_info_t) == 20, "app_pen_info_t is part of the app ABI");
 APP_API_ASSERT(sizeof(app_touchbar_t) == 32, "app_touchbar_t is part of the app ABI");
 APP_API_ASSERT(sizeof(app_espnow_pkt_t) == 258, "app_espnow_pkt_t is part of the app ABI");
 APP_API_ASSERT(sizeof(app_local_time_t) == 16, "app_local_time_t is part of the app ABI");
 APP_API_ASSERT(sizeof(app_setting_decl_t) == 3 * sizeof(void *) + 12 + (sizeof(void *) == 8 ? 4 : 0),
                "app_setting_decl_t is part of the app ABI");
-APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 6, "a new version adds its own size check above");
+APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 7, "a new version adds its own size check above");
 
 #endif // APP_API_H
