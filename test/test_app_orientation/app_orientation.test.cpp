@@ -34,8 +34,12 @@ void test_the_call_stays_in_its_slot_when_the_table_grows() {
   TEST_ASSERT_EQUAL(APP_API_SLOT(47), offsetof(app_api_t, keyboard_chars));
   TEST_ASSERT_EQUAL(APP_API_SLOT(48), offsetof(app_api_t, pen_enable)); // 2.7 (the pen tablet)
   TEST_ASSERT_EQUAL(APP_API_SLOT(49), offsetof(app_api_t, pen_info));
-  TEST_ASSERT_EQUAL(APP_API_SLOT(50), sizeof(app_api_t));
-  TEST_ASSERT_EQUAL(7, APP_API_MINOR);
+  TEST_ASSERT_EQUAL(APP_API_SLOT(50), offsetof(app_api_t, file_list_apps)); // 2.8 (other apps' files)
+  TEST_ASSERT_EQUAL(APP_API_SLOT(53), offsetof(app_api_t, app_launch)); // 2.9 (launching)
+  TEST_ASSERT_EQUAL(APP_API_SLOT(54), offsetof(app_api_t, app_arg));
+  TEST_ASSERT_EQUAL(APP_API_SLOT(55), offsetof(app_api_t, net_browse)); // 2.10 (finding printers)
+  TEST_ASSERT_EQUAL(APP_API_SLOT(56), sizeof(app_api_t));
+  TEST_ASSERT_EQUAL(10, APP_API_MINOR);
 }
 
 // API 2.5: screen_orientation keeps its two values, from the accelerometer once it has a reading
