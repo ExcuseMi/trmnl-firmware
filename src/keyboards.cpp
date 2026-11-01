@@ -8,6 +8,7 @@
 #include "ble_keyboard.h"
 #include "kbd_layout_x.h"
 #include "keyboards.h"
+#include "usb_pen_x.h"
 
 int usb_keyboard_enable(bool on);
 bool usb_keyboard_connected(void);
@@ -42,6 +43,7 @@ void keyboards_post_change(void) {
 }
 
 void keyboards_end(void) {
+  usb_pen_x_enable(false); // the next app starts without the pen (app_api.h pen_enable)
   ble_keyboard_end();
   usb_keyboard_end();
 }

@@ -16,6 +16,7 @@
 #include "app_host.h"
 #include "evlog.h"
 #include "keyboards.h"
+#include "usb_pen_x.h"
 #include "usb_port_role.h"
 
 #define IOX_CHG_PG       0 // input, low: the charger has input power (VBUS from a charger or computer)
@@ -24,19 +25,22 @@
 #define BOOST_OFF_WAIT_MS 8000 // the boost goes off after the refresh holding the expander (seconds), else a restart
 
 static TaskHandle_t port_task;
-static volatile bool wanted, stop_task;
+static volatile bool wanted, pen_wanted, stop_task; // wanted: USB keys; pen_wanted: the pen (usb_pen_x.h)
 static volatile bool keyboard_open;
 static QueueHandle_t conn_q, report_q;
 static hid_host_device_handle_t open_dev;
 static hid_keys_t keys;
 
-// A non-keyboard HID interface (a pen tablet): opened in report protocol, only logged (usb_probe.h)
+// A non-keyboard HID interface: opened in report protocol. An unknown one is only logged (usb_probe.h); a pen tablet's
+// (usb_pen.h role STANDARD or FULL) reports go to usb_pen_x.h
 #define PROBE_SLOTS 4
 typedef struct {
   hid_host_device_handle_t h; // nullptr: free
   uint8_t iface;
+  usb_pen_iface_t pen; // USB_PEN_IFACE_NONE: the probe
   usb_probe_t pr;
 } probe_slot_t;
+static uint8_t pen_mode_logged; // APP_PEN_MODE_* already in the event log for the tablet now on
 static probe_slot_t probes[PROBE_SLOTS];
 
 typedef struct {
@@ -84,6 +88,10 @@ static void iface_cb(hid_host_device_handle_t h, const hid_host_interface_event_
     uint8_t d[64];
     size_t n = 0;
     if (hid_host_device_get_raw_input_report_data(h, d, sizeof(d), &n) != ESP_OK) break;
+    if (ps && ps->pen != USB_PEN_IFACE_NONE) { // parsed here: 200 reports a second, not through the port task
+      usb_pen_x_report(ps->pen, d, n);
+      break;
+    }
     r.len = (uint8_t)(n < sizeof(r.data) ? n : sizeof(r.data));
     memcpy(r.data, d, r.len);
     if (ps) {
@@ -168,10 +176,13 @@ static bool host_stop(uint32_t deadline) {
     open_dev = nullptr;
   }
   keyboard_open = false;
+  bool had_pen = false;
   for (probe_slot_t &ps : probes) {
     if (ps.h) hid_host_device_close(ps.h);
+    if (ps.h && ps.pen != USB_PEN_IFACE_NONE) had_pen = true;
     ps.h = nullptr;
   }
+  if (had_pen) usb_pen_x_detach();
   while (hid_host_uninstall() != ESP_OK) { // a device still listed: its removal (boost off) takes a moment
     if ((int32_t)(millis() - deadline) >= 0) return false;
     delay(20);
@@ -206,12 +217,30 @@ static void log_interface(hid_host_device_handle_t h, const hid_host_dev_params_
   if (len > USB_PROBE_DESC_MAX) evlog_add("HID i%u descriptor %u bytes, first %u shown", p.iface_num, (unsigned)len, USB_PROBE_DESC_MAX);
 }
 
-// A connected HID interface: a boot keyboard is opened as the keyboard (none yet); any other interface is opened in
-// report protocol for the probe. Every interface is logged.
+static bool pen_open(void) {
+  for (const probe_slot_t &ps : probes) {
+    if (ps.h && ps.pen != USB_PEN_IFACE_NONE) return true;
+  }
+  return false;
+}
+
+// A connected HID interface: a pen tablet's (usb_pen.h) to the pen or to nobody, never to the keyboard; a boot keyboard
+// is opened as the keyboard (none yet); any other interface is opened in report protocol for the probe. Every
+// interface opened is logged.
 static void open_interface(hid_host_device_handle_t h) {
   hid_host_dev_params_t p;
   if (hid_host_device_get_params(h, &p) != ESP_OK) return;
-  bool as_kbd = p.sub_class == HID_SUBCLASS_BOOT_INTERFACE && p.proto == HID_PROTOCOL_KEYBOARD && !open_dev;
+  hid_host_dev_info_t info;
+  bool got_info = hid_host_get_device_info(h, &info) == ESP_OK;
+  usb_pen_iface_t pen = got_info ? usb_pen_iface_role(info.VID, info.PID, p.iface_num) : USB_PEN_IFACE_NONE;
+  if (pen == USB_PEN_IFACE_IGNORE) {
+    evlog_add("Pen %04x:%04x i%u: not used", info.VID, info.PID, p.iface_num);
+    return;
+  }
+  bool as_kbd = pen == USB_PEN_IFACE_NONE && p.sub_class == HID_SUBCLASS_BOOT_INTERFACE &&
+                p.proto == HID_PROTOCOL_KEYBOARD && !open_dev;
+  int switched = -1; // full mode: the interrupt OUT transfer's result, before the HID driver claims the interface
+  if (pen == USB_PEN_IFACE_FULL) switched = usb_pen_x_full_mode(p.addr, p.iface_num);
   probe_slot_t *ps = nullptr;
   if (!as_kbd) {
     for (probe_slot_t &s : probes) {
@@ -236,18 +265,38 @@ static void open_interface(hid_host_device_handle_t h) {
     open_dev = h;
     hid_class_request_set_protocol(h, HID_REPORT_PROTOCOL_BOOT); // many start in it already: not fatal
   } else {
-    ps->h = h;
     ps->iface = p.iface_num;
+    ps->pen = pen;
     usb_probe_init(&ps->pr, millis());
     hid_class_request_set_protocol(h, HID_REPORT_PROTOCOL_REPORT); // not fatal
+    if (pen != USB_PEN_IFACE_NONE) {
+      if (!pen_open()) pen_mode_logged = APP_PEN_MODE_NONE;
+      usb_pen_x_attach(info.VID, info.PID);
+    }
+    ps->h = h;
+  }
+  if (pen == USB_PEN_IFACE_FULL) {
+    if (switched != ESP_OK) { // once more as SET_REPORT (output, report 02); no string descriptors (they stalled it)
+      uint8_t cmd[USB_PEN_CMD_LEN];
+      memcpy(cmd, usb_pen_full_mode_cmd, sizeof(cmd));
+      esp_err_t rc2 = hid_class_request_set_report(h, HID_REPORT_TYPE_OUTPUT, cmd[0], cmd, sizeof(cmd));
+      evlog_add("Pen %04x:%04x: full mode by OUT failed (%s), SET_REPORT %s", info.VID, info.PID,
+                esp_err_to_name((esp_err_t)switched), esp_err_to_name(rc2));
+    } else {
+      evlog_add("Pen %04x:%04x: full mode asked", info.VID, info.PID);
+    }
   }
   hid_class_request_set_idle(h, 0, 0);
   rc = hid_host_device_start(h);
   if (rc != ESP_OK) {
     evlog_add("HID i%u: start failed: %s", p.iface_num, esp_err_to_name(rc));
     hid_host_device_close(h);
-    if (ps) ps->h = nullptr;
-    else open_dev = nullptr;
+    if (ps) {
+      ps->h = nullptr;
+      if (pen != USB_PEN_IFACE_NONE && !pen_open()) usb_pen_x_detach();
+    } else {
+      open_dev = nullptr;
+    }
     return;
   }
   if (!as_kbd) return;
@@ -263,10 +312,19 @@ static void drain_reports(void) {
     uint32_t n;
     if (ps.h && usb_probe_summary(&ps.pr, millis(), &n)) evlog_add("HID i%u: %lu reports", ps.iface, (unsigned long)n);
   }
+  uint8_t mode = usb_pen_x_mode();
+  if (mode != pen_mode_logged && pen_open()) { // the mode the tablet's data came in
+    pen_mode_logged = mode;
+    app_pen_info_t info;
+    usb_pen_x_info(&info);
+    evlog_add("Pen %04x:%04x: %s mode", info.vid, info.pid, mode == APP_PEN_MODE_FULL ? "full" : "standard");
+  }
   while (xQueueReceive(report_q, &r, 0) == pdTRUE) {
     if (r.probe) {
       probe_slot_t &ps = probes[r.probe - 1];
-      if (r.gone) {
+      if (r.gone && ps.pen != USB_PEN_IFACE_NONE) {
+        if (!pen_open()) usb_pen_x_detach(); // its last interface
+      } else if (r.gone) {
         evlog_add("HID i%u gone after %lu reports", ps.iface, (unsigned long)ps.pr.total);
       } else {
         char hex[USB_PROBE_REPORT_BYTES * 3];
@@ -304,7 +362,8 @@ static void port_loop(void *arg) {
       was_open = keyboard_open;
       if (was_open) keyboards_post_change();
     }
-    usb_port_input_t in = {wanted && !stop_task, read_power(), keyboard_open, usb_port_role() == USB_ROLE_DRIVE};
+    usb_port_input_t in = {(wanted || pen_wanted) && !stop_task, read_power(),
+                           keyboard_open || (pen_wanted && pen_open()), usb_port_role() == USB_ROLE_DRIVE};
     usb_port_mode_t mode = usb_port_step(&port, millis(), &in);
     if (port.why != why) {
       why = port.why;
@@ -349,10 +408,9 @@ static void port_loop(void *arg) {
   vTaskDelete(nullptr);
 }
 
-int usb_keyboard_enable(bool on) {
-  // A restart: usb_port_role.cpp's handler gives the PHY back (no I2C there: the boot switches the boost off)
-  wanted = on;
-  if (!on || port_task) return 0;
+// Starts the port task when keys or the pen are wanted
+static int port_start(void) {
+  if (!(wanted || pen_wanted) || port_task) return 0;
   if (!conn_q) conn_q = xQueueCreate(4, sizeof(hid_host_device_handle_t));
   if (!report_q) report_q = xQueueCreate(48, sizeof(kbd_report_t));
   if (!conn_q || !report_q) return APP_ENOMEM;
@@ -361,10 +419,22 @@ int usb_keyboard_enable(bool on) {
   return 0;
 }
 
+int usb_keyboard_enable(bool on) {
+  // A restart: usb_port_role.cpp's handler gives the PHY back (no I2C there: the boot switches the boost off)
+  wanted = on;
+  return port_start();
+}
+
+int usb_keyboard_pen(bool on) {
+  pen_wanted = on;
+  return port_start();
+}
+
 bool usb_keyboard_connected(void) { return keyboard_open; }
 
 void usb_keyboard_end(void) {
   wanted = false;
+  pen_wanted = false;
   stop_task = true;
   uint32_t start = millis();
   while (port_task && millis() - start < 3 * STOP_DEADLINE_MS) delay(10);

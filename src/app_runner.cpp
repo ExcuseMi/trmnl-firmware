@@ -39,6 +39,7 @@
 #include "orientation_x.h"
 #include "usb_drive.h"
 #include "usb_port_role.h"
+#include "usb_pen_x.h"
 #include "webshare.h"
 #include "app_settings_x.h"
 
@@ -262,6 +263,7 @@ static bool app_supervise(PreferencesPersistence &persistence) {
       app_event_t ev = {};
       ev.type = APP_EVENT_EXIT;
       xQueueReset(app_host.events);
+      usb_pen_x_token_taken(); // the reset took a pen token with it
       post(ev);
       exit_asked = millis();
       app_exit_asked = true;

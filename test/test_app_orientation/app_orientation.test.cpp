@@ -30,8 +30,12 @@ void test_the_call_stays_in_its_slot_when_the_table_grows() {
   TEST_ASSERT_EQUAL(APP_API_SLOT(41), offsetof(app_api_t, device_orientation)); // 2.5 (the accelerometer)
   TEST_ASSERT_EQUAL(APP_API_SLOT(42), offsetof(app_api_t, orientation_follow));
   TEST_ASSERT_EQUAL(APP_API_SLOT(43), offsetof(app_api_t, touchbar_layout));
-  TEST_ASSERT_EQUAL(APP_API_SLOT(44), sizeof(app_api_t));
-  TEST_ASSERT_EQUAL(5, APP_API_MINOR);
+  TEST_ASSERT_EQUAL(APP_API_SLOT(44), offsetof(app_api_t, keyboard_layout_name)); // 2.6 (layout, settings form)
+  TEST_ASSERT_EQUAL(APP_API_SLOT(47), offsetof(app_api_t, keyboard_chars));
+  TEST_ASSERT_EQUAL(APP_API_SLOT(48), offsetof(app_api_t, pen_enable)); // 2.7 (the pen tablet)
+  TEST_ASSERT_EQUAL(APP_API_SLOT(49), offsetof(app_api_t, pen_info));
+  TEST_ASSERT_EQUAL(APP_API_SLOT(50), sizeof(app_api_t));
+  TEST_ASSERT_EQUAL(7, APP_API_MINOR);
 }
 
 // API 2.5: screen_orientation keeps its two values, from the accelerometer once it has a reading

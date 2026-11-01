@@ -51,6 +51,7 @@
 #include "evlog.h"
 #include "keyboards.h"
 #include "usb_drive.h"
+#include "usb_pen_x.h"
 #include "webshare.h"
 
 app_host_t app_host;
@@ -103,9 +104,21 @@ static int screen_refresh(const app_rect_t *rect, app_refresh_t how) {
 
 // ---- input, time, log ----
 
+// Pen data waits in usb_pen_x.h's queue (moves merged); an APP_EVENT_PEN in the app's queue is only its token, so
+// pen data takes its turn with keys, touches and APP_EVENT_EXIT (a token for the rest goes to the back)
 static bool input_poll(app_event_t *ev, uint32_t timeout_ms) {
   if (!ev) return false;
-  return xQueueReceive(app_host.events, ev, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+  const uint32_t start = millis();
+  uint32_t wait = timeout_ms;
+  while (xQueueReceive(app_host.events, ev, pdMS_TO_TICKS(wait)) == pdTRUE) {
+    if (ev->type != APP_EVENT_PEN) return true;
+    usb_pen_x_token_taken();
+    if (usb_pen_x_take(ev)) return true;
+    const uint32_t spent = millis() - start; // a token whose data was taken already: wait on
+    if (spent >= timeout_ms) break;
+    wait = timeout_ms - spent;
+  }
+  return false;
 }
 
 static uint32_t app_millis(void) { return millis(); }
@@ -133,6 +146,7 @@ static int local_time(app_local_time_t *out) {
 
 static bool sleep_ms(uint32_t ms) {
   app_event_t ev;
+  if (usb_pen_x_waiting()) return true;
   return xQueuePeek(app_host.events, &ev, pdMS_TO_TICKS(ms)) == pdTRUE;
 }
 
@@ -490,6 +504,10 @@ static int keyboard_chars(int on) {
   return 0;
 }
 
+// ---- API 2.7: the pen tablet (usb_pen_x.h) ----
+
+static int pen_enable(int on) { return usb_pen_x_enable(on != 0); }
+
 static int app_webshare_start_settings(app_webshare_mode_t mode) {
   if (!app_settings_x_declared()) return APP_ENOENT;
   if (radio_claim_check(espnow_app_radio_users(), RADIO_WANT_WEBSHARE)) return APP_EBUSY;
@@ -530,6 +548,7 @@ static const app_api_t table = {
     touchbar_layout,
     keyboard_layout_name, app_settings_x_declare,
     app_webshare_start_settings, keyboard_chars,
+    pen_enable, usb_pen_x_info,
 };
 
 const app_api_t *app_api_table(void) {

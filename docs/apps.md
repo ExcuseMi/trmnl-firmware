@@ -34,6 +34,7 @@ The firmware calls `int app_main(const app_api_t *api)`. Return 0 when done, any
 | position (API 2.5) | `device_orientation()`, `orientation_follow(on, settle_ms)`, `touchbar_layout(o, &bar)`, `APP_EVENT_ORIENTATION`: the X's position from its accelerometer, see "Touch bar and position" below. Check `api->size >= APP_API_SLOT(44)` first |
 | keyboard layout (API 2.6) | `keyboard_layout_name()`: the X's layout for help text; keys come mapped by it after `keyboard_chars(1)` (default off: APP_KEY_HID as before, for apps with their own layouts like the writer; check `APP_API_SLOT(48)`), see "Keyboard layout" below. Check `api->size >= APP_API_SLOT(45)` first |
 | settings form (API 2.6) | `settings_declare(decls, n)`, `webshare_start_settings(mode)`, `APP_EVENT_SETTINGS`: the app's settings typed on the phone, see "Settings profile" below. Check `api->size >= APP_API_SLOT(47)` first |
+| pen tablet (API 2.7) | `pen_enable(1)`, `pen_info(&info)`, `APP_EVENT_PEN`, `APP_EVENT_PEN_KEY`: a USB pen tablet, see "Pen tablet" below. Check `api->size >= APP_API_SLOT(50)` first |
 
 Errors are negative `APP_E*` values.
 
@@ -129,6 +130,22 @@ An app's settings typed on the phone (any language, the phone's keyboard): `sett
 | save | every sent value checked first (too long or short, broken UTF-8 or control characters, not a whole number, out of range, not one of the choices: "<label>: <why>", nothing written), then `setting_set` per changed key; an empty text removes the key. Then `APP_EVENT_SETTINGS` with `key` = values changed |
 | stored | as text: a number as its digits (`-12`), a choice as itself; read with `setting_get` |
 | secret | never sent back (only "set" / "not set"), never logged (the log says only how many changed); left empty on the page: kept. It cannot be cleared from the page |
+
+## Pen tablet (API 2.7)
+
+`pen_enable(1)` asks for USB host mode as `keyboard_enable(APP_KBD_USB)` does (same port rules; a tablet keeps host mode like a keyboard). Default off at every start. Pure part `lib/trmnl/src/usb_pen.cpp`, USB side `src/usb_pen_x.cpp` and `src/usb_keyboard.cpp`.
+
+| | |
+|---|---|
+| events | `input_poll(&u.ev, ..)` with `app_any_event_t u`; for `APP_EVENT_PEN` and `APP_EVENT_PEN_KEY` read `u.pen` (`app_pen_event_t`): `flags` (`APP_PEN_TIP`, `APP_PEN_IN_RANGE`, `APP_PEN_BARREL`, `APP_PEN_BARREL2`), `x`, `y` 0..65535 over the area (0 0 top left), `pressure` 0..65535 (0 without tip), `tilt_x`, `tilt_y` degrees, `keys` (tablet buttons down, bit 0..7), `changed` (PEN: flags that changed, 0 a move; PEN_KEY: key bits that changed) |
+| merging | pen events wait in a 16-entry queue: an unread move is replaced by the newer one; tip, range and button changes are never merged; a full queue drops a waiting move first. Pen data takes its turn in the app's queue (a token), so keys, touches and exit still come. Drops counted in `pen_info().dropped` |
+| `pen_info` | `vid`, `pid`, `mode` (`APP_PEN_MODE_NONE`, `FULL`, `STANDARD`), `key_count` (8 in full mode), `width_um`, `height_um` (0 unknown: draw with that aspect ratio), `dropped` |
+| XP-Pen Deco 01 V2 (28bd:0905) | interface 2: before the HID driver claims it, `02 b0 04 00 00 00 00 00 00 00` as an interrupt OUT transfer (as Linux hid-uclogic), once SET_REPORT if that fails; then report 02 (pen; `f0` frames: the 8 buttons). Fallback: standard report 07 on interface 1 (pen only), used until a full-mode frame comes. Interface 0 and any other: opened by nobody. String descriptors 100/200 are never asked (they stalled the tablet) |
+| unproven | full-mode maxima x 50800, y 31750, pressure 8191 (the maker's 10 x 6.25 in at 5080 lpi; Linux reads them from string descriptor 200); the capture saw only x up to 24150, y 14909, pressure 3918. Pen buttons in full mode (byte 1 bits 0x02, 0x04, as in standard mode) are not in the capture. The OUT transfer and SET_REPORT never ran on the X |
+| other XP-Pen (28bd) | standard report 07 on interface 1, scaled by 32767 / 8191 (unproven for other models); other interfaces unused |
+| other tablets | not parsed: only the probe's log lines below (no generic digitizer parser yet) |
+| event log | `Pen <vid:pid>: full mode asked` or `full mode by OUT failed (<err>), SET_REPORT <err>`; `Pen <vid:pid>: full mode` / `standard mode` at the first data; `Pen <vid:pid> i<n>: not used`; `Pen <vid:pid> gone, raw max x .. y .. p ..` (the largest raw values: draw to the corners and press hard to check the maxima) |
+| never | a tablet interface as the keyboard: no typed keys from its keyboard or mouse interfaces, with or without `pen_enable` |
 
 ## USB port roles
 
@@ -363,6 +380,7 @@ status: the switch can take the window of a touch event, and that touch then nev
 |---|---|---|
 | ELF checks (truncation, arch, tables, relocations, app_info, memory, random damage) | `test/test_app_elf_check` | `pio test -e native -f test_app_elf_check` |
 | paths, resume state, serial keys, upload header and CRC | `test/test_app_path`, `test_app_resume`, `test_app_keys`, `test_app_upload` | `pio test -e native -f test_app_*` |
+| pen tablet: interface roles (never the keyboard), full-mode reports from the owner's tablet (hover, tip, leave, tilt, each button down and up), the standard report 07, short, wrong id and garbage reports, scaling ends, the merging queue (moves merged, changes kept in order, full queue) | `test/test_usb_pen` | `pio test -e native -f test_usb_pen` |
 | USB port rules (roles: one at a time, only the owner switches back; power, 1 s wait, probe, removal, charger in host mode, drive showing, app exit, restart), HID reports to key events | `test/test_usb_port`, `test/test_hid_keys` | `pio test -e native -f test_usb_port -f test_hid_keys` |
 | battery and local time: unreadable gauge, charging flag, clock never set, no or unusable zone (UTC fallback), DST, west of UTC across midnight | `test/test_app_clock` | `pio test -e native -f test_app_clock` |
 | configuration: header up to date, every key required, no configured value left in the sources | `test/config` | `.venv/bin/pytest test/config` |
