@@ -228,29 +228,59 @@ static app_pen_event_t mk(uint8_t type, uint8_t changed, uint16_t x) {
   return e;
 }
 
-void test_moves_merge_into_the_latest() {
-  usb_pen_queue_t q;
+// device 2026-11-01: moves merged while the app waited on a refresh drew curves as straight lines
+void test_moves_are_kept_in_order_while_the_app_is_busy() {
+  static usb_pen_queue_t q;
   usb_pen_queue_init(&q);
-  for (uint16_t i = 1; i <= 200; i++) { // a second of hover the app did not read
+  for (uint16_t i = 1; i <= 200; i++) { // a second of drawing the app did not read yet
     app_pen_event_t e = mk(APP_EVENT_PEN, 0, i);
     usb_pen_queue_push(&q, &e);
   }
-  TEST_ASSERT_EQUAL(1, q.count);
+  TEST_ASSERT_EQUAL(200, q.count);
   app_pen_event_t got;
-  TEST_ASSERT_TRUE(usb_pen_queue_take(&q, &got));
-  TEST_ASSERT_EQUAL(200, got.x);
+  for (uint16_t i = 1; i <= 200; i++) {
+    TEST_ASSERT_TRUE(usb_pen_queue_take(&q, &got));
+    TEST_ASSERT_EQUAL(i, got.x);
+  }
   TEST_ASSERT_FALSE(usb_pen_queue_take(&q, &got));
   TEST_ASSERT_EQUAL(0, q.dropped);
 }
 
+void test_full_queue_of_moves_keeps_the_latest_place() {
+  static usb_pen_queue_t q;
+  usb_pen_queue_init(&q);
+  for (uint16_t i = 0; i < USB_PEN_QUEUE + 5; i++) {
+    app_pen_event_t e = mk(APP_EVENT_PEN, 0, i);
+    usb_pen_queue_push(&q, &e);
+  }
+  TEST_ASSERT_EQUAL(USB_PEN_QUEUE, q.count);
+  TEST_ASSERT_EQUAL(5, q.dropped);
+  app_pen_event_t got;
+  uint16_t last = 0;
+  while (usb_pen_queue_take(&q, &got)) last = got.x;
+  TEST_ASSERT_EQUAL(USB_PEN_QUEUE + 4, last);
+}
+
+// device 2026-11-01: the tablet's corner (raw 25400 x 15405 seen) must reach the screen's corner
+void test_full_mode_far_corner_reaches_the_screen_corner() {
+  usb_pen_t p;
+  usb_pen_init(&p, USB_PEN_VID_XPPEN, USB_PEN_PID_DECO01V2);
+  p.mode = APP_PEN_MODE_FULL;
+  const uint8_t r[] = {0x02, 0xa1, 0x38, 0x63, 0x6c, 0x3c, 0x00, 0x10, 0, 0, 0, 0}; // x 25400, y 15468
+  app_pen_event_t ev;
+  TEST_ASSERT_EQUAL(1, usb_pen_report(&p, USB_PEN_IFACE_FULL, r, sizeof r, &ev));
+  TEST_ASSERT_EQUAL(65535, ev.x);
+  TEST_ASSERT_GREATER_THAN(62000, ev.y);
+}
+
 void test_changes_keep_their_order_and_are_never_merged() {
-  usb_pen_queue_t q;
+  static usb_pen_queue_t q;
   usb_pen_queue_init(&q);
   app_pen_event_t seq[] = {mk(APP_EVENT_PEN, 0, 1), mk(APP_EVENT_PEN, APP_PEN_TIP, 2), mk(APP_EVENT_PEN, 0, 3),
                            mk(APP_EVENT_PEN, 0, 4), mk(APP_EVENT_PEN_KEY, 1, 5), mk(APP_EVENT_PEN_KEY, 1, 6),
                            mk(APP_EVENT_PEN, APP_PEN_TIP, 7)};
   for (auto &e : seq) usb_pen_queue_push(&q, &e);
-  const uint16_t want[] = {1, 2, 4, 5, 6, 7};
+  const uint16_t want[] = {1, 2, 3, 4, 5, 6, 7};
   app_pen_event_t got;
   for (uint16_t w : want) {
     TEST_ASSERT_TRUE(usb_pen_queue_take(&q, &got));
@@ -260,7 +290,7 @@ void test_changes_keep_their_order_and_are_never_merged() {
 }
 
 void test_full_queue_drops_a_move_never_a_change() {
-  usb_pen_queue_t q;
+  static usb_pen_queue_t q;
   usb_pen_queue_init(&q);
   for (uint16_t i = 0; i < USB_PEN_QUEUE; i++) { // move, change, move, change ...
     app_pen_event_t e = mk(APP_EVENT_PEN, (i & 1) ? APP_PEN_TIP : 0, i);
@@ -287,7 +317,7 @@ void test_full_queue_drops_a_move_never_a_change() {
 }
 
 void test_only_changes_unread_drops_and_counts() {
-  usb_pen_queue_t q;
+  static usb_pen_queue_t q;
   usb_pen_queue_init(&q);
   for (uint16_t i = 0; i < USB_PEN_QUEUE + 3; i++) {
     app_pen_event_t e = mk(APP_EVENT_PEN_KEY, 1, i);
@@ -316,7 +346,9 @@ int main(int argc, char **argv) {
   RUN_TEST(test_bad_reports_give_nothing);
   RUN_TEST(test_scaling_ends);
   RUN_TEST(test_info);
-  RUN_TEST(test_moves_merge_into_the_latest);
+  RUN_TEST(test_moves_are_kept_in_order_while_the_app_is_busy);
+  RUN_TEST(test_full_queue_of_moves_keeps_the_latest_place);
+  RUN_TEST(test_full_mode_far_corner_reaches_the_screen_corner);
   RUN_TEST(test_changes_keep_their_order_and_are_never_merged);
   RUN_TEST(test_full_queue_drops_a_move_never_a_change);
   RUN_TEST(test_only_changes_unread_drops_and_counts);

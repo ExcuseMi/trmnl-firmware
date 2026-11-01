@@ -24,8 +24,10 @@
 #define USB_PEN_VID_XPPEN    0x28bd
 #define USB_PEN_PID_DECO01V2 0x0905
 
-#define USB_PEN_DECO_MAX_X     50800 // full mode, unproven (see above)
-#define USB_PEN_DECO_MAX_Y     31750
+// Full mode maxima measured on the owner's tablet (device 2026-11-01: raw max x 25400 y 15405 p 8191); the maker's
+// 5080 lpi figure (50800 x 31750) left three quarters of the screen out of reach. 15875 = 6.25 in at 2540 lpi
+#define USB_PEN_DECO_MAX_X     25400
+#define USB_PEN_DECO_MAX_Y     15875
 #define USB_PEN_DECO_MAX_P     8191
 #define USB_PEN_DECO_WIDTH_UM  254000
 #define USB_PEN_DECO_HEIGHT_UM 158750
@@ -78,15 +80,16 @@ void usb_pen_info(const usb_pen_t *p, app_pen_info_t *out);
 
 // ---- the queue to the app ----
 
-// Holds the pen events the app has not taken. A move (APP_EVENT_PEN with changed 0) onto a move at the end replaces
-// it: the app gets the latest place, never a backlog. A change (tip, range, a pen or tablet button) is never merged;
-// when the queue is full a waiting move makes room for it, and only with USB_PEN_QUEUE changes unread is one dropped.
-// Every drop is counted
-#define USB_PEN_QUEUE 16
+// Holds the pen events the app has not taken, every move in order (device 2026-11-01: merging unread moves into the
+// latest turned curves into straight lines while the app waited on a panel refresh). 512 events = 2.5 s at 200 Hz.
+// Only when full: a move onto a move at the end replaces it; a change (tip, range, a pen or tablet button) is never
+// merged, a waiting move makes room for it, and only with USB_PEN_QUEUE changes unread is one dropped. Every drop is
+// counted
+#define USB_PEN_QUEUE 512
 
 typedef struct {
   app_pen_event_t ev[USB_PEN_QUEUE];
-  uint8_t head, count;
+  uint16_t head, count;
   uint32_t dropped;
 } usb_pen_queue_t;
 

@@ -144,13 +144,12 @@ static bool is_move(const app_pen_event_t *e) { return e->type == APP_EVENT_PEN 
 static app_pen_event_t *at(usb_pen_queue_t *q, unsigned i) { return &q->ev[(q->head + i) % USB_PEN_QUEUE]; }
 
 void usb_pen_queue_push(usb_pen_queue_t *q, const app_pen_event_t *e) {
-  if (q->count && is_move(e) && is_move(at(q, q->count - 1u))) {
-    *at(q, q->count - 1u) = *e; // the latest place only
-    return;
-  }
   if (q->count == USB_PEN_QUEUE) {
     q->dropped++;
-    if (is_move(e)) return;
+    if (is_move(e)) {
+      if (is_move(at(q, q->count - 1u))) *at(q, q->count - 1u) = *e; // full: the latest place only
+      return;
+    }
     unsigned i = 0;
     while (i < q->count && !is_move(at(q, i))) i++;
     if (i == q->count) return; // only changes unread: the app stopped reading
@@ -164,7 +163,7 @@ void usb_pen_queue_push(usb_pen_queue_t *q, const app_pen_event_t *e) {
 bool usb_pen_queue_take(usb_pen_queue_t *q, app_pen_event_t *out) {
   if (!q->count) return false;
   *out = q->ev[q->head];
-  q->head = (uint8_t)((q->head + 1u) % USB_PEN_QUEUE);
+  q->head = (uint16_t)((q->head + 1u) % USB_PEN_QUEUE);
   q->count--;
   return true;
 }
