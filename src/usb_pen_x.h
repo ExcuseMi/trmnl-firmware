@@ -7,6 +7,7 @@
 #include <app_api.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <usb_cursor.h>
 #include <usb_mouse.h>
 #include <usb_pen.h>
 
@@ -37,9 +38,10 @@ void usb_pen_x_report(usb_pen_iface_t role, const uint8_t *d, size_t len);
 // before the HID driver claims the interface. 0, or an esp_err_t (then the caller tries SET_REPORT once)
 int usb_pen_x_full_mode(uint8_t addr, uint8_t iface);
 
-// A USB mouse (lib/trmnl usb_mouse.h) draws as a pen in mode APP_PEN_MODE_MOUSE while the app wants the pen. A tablet
-// wins: while one is attached the mouse's reports are dropped, and pen_info says tablet. When the tablet goes, a mouse
-// still attached comes back in range. Its interface layout comes with each report
+// A USB mouse (lib/trmnl usb_mouse.h) draws as a pen in mode APP_PEN_MODE_MOUSE while the app wants the pen. With a
+// tablet attached (usb_cursor.h): the pen in range owns the cursor and the mouse's reports are dropped; the pen out of
+// range, the mouse drives from the pen's last place. pen_info says tablet, flags APP_PEN_INFO_MOUSE. Its interface
+// layout comes with each report
 void usb_pen_x_mouse_attach(uint16_t vid, uint16_t pid);
 void usb_pen_x_mouse_detach(void);
 void usb_pen_x_mouse_report(const usb_mouse_layout_t *l, const uint8_t *d, size_t len);
