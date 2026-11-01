@@ -34,11 +34,13 @@ void usb_probe_init(usb_probe_t *p, uint32_t now) {
   p->summary_ms = now;
 }
 
-bool usb_probe_report(usb_probe_t *p) {
+bool usb_probe_report_upto(usb_probe_t *p, uint32_t first) {
   uint32_t t = p->total;
   if (t != 0xFFFFFFFFu) p->total = t + 1;
-  return t < USB_PROBE_FULL_REPORTS;
+  return t < first;
 }
+
+bool usb_probe_report(usb_probe_t *p) { return usb_probe_report_upto(p, USB_PROBE_FULL_REPORTS); }
 
 bool usb_probe_summary(usb_probe_t *p, uint32_t now, uint32_t *count) {
   uint32_t t = p->total;

@@ -209,6 +209,51 @@ void test_no_host_mode_while_the_drive_has_the_port() {
   TEST_ASSERT_EQUAL(0, host_after(5000, true, USB_POWER_NO, false));
 }
 
+// The boost: one busy try left a tablet plugged later without power (2026-11-01)
+void test_boost_first_try_now_and_on_stays_on() {
+  usb_boost_t b;
+  usb_boost_init(&b, 5000);
+  TEST_ASSERT_TRUE(usb_boost_due(&b, 5000));
+  TEST_ASSERT_EQUAL(USB_BOOST_LOG_NONE, usb_boost_result(&b, 5000, true));
+  TEST_ASSERT_FALSE(usb_boost_due(&b, 60000)); // on: never again
+}
+
+void test_boost_busy_retries_fast_then_slow_and_logs_once() {
+  usb_boost_t b;
+  uint32_t t = 0xFFFFFF00u; // across the clock wrap
+  usb_boost_init(&b, t);
+  int tries = 0, failed_logs = 0;
+  uint32_t end = t + 1000; // the fast tries fit in about 1 s
+  for (uint32_t now = t; (int32_t)(now - end) <= 0; now += USB_PORT_POLL_MS) {
+    if (!usb_boost_due(&b, now)) continue;
+    tries++;
+    if (usb_boost_result(&b, now, false) == USB_BOOST_LOG_FAILED) failed_logs++;
+  }
+  TEST_ASSERT_EQUAL(USB_BOOST_FAST_TRIES, tries);
+  TEST_ASSERT_EQUAL(1, failed_logs);
+  int more = 0;
+  for (uint32_t now = end; (int32_t)(now - (end + 10000)) < 0; now += USB_PORT_POLL_MS) {
+    if (!usb_boost_due(&b, now)) continue;
+    more++;
+    TEST_ASSERT_EQUAL(USB_BOOST_LOG_NONE, usb_boost_result(&b, now, false)); // logged once only
+  }
+  TEST_ASSERT_TRUE(more >= 4 && more <= 6); // every USB_BOOST_SLOW_MS: bounded, never given up
+}
+
+void test_boost_late_on_after_the_fast_tries_powers_a_later_plug() {
+  usb_boost_t b;
+  usb_boost_init(&b, 0);
+  uint32_t now = 0;
+  for (int i = 0; i < 300; i++) { // a long refresh: busy for 30 s
+    if (usb_boost_due(&b, now)) usb_boost_result(&b, now, false);
+    now += USB_PORT_POLL_MS;
+  }
+  TEST_ASSERT_FALSE(b.on);
+  while (!usb_boost_due(&b, now)) now += USB_PORT_POLL_MS;
+  TEST_ASSERT_EQUAL(USB_BOOST_LOG_ON_LATE, usb_boost_result(&b, now, true));
+  TEST_ASSERT_TRUE(b.on);
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_starts_and_stays_in_device_mode_without_an_app);
@@ -230,5 +275,8 @@ int main(int argc, char **argv) {
   RUN_TEST(test_host_holds_the_phy_against_the_drive);
   RUN_TEST(test_only_the_owner_switches_back);
   RUN_TEST(test_no_host_mode_while_the_drive_has_the_port);
+  RUN_TEST(test_boost_first_try_now_and_on_stays_on);
+  RUN_TEST(test_boost_busy_retries_fast_then_slow_and_logs_once);
+  RUN_TEST(test_boost_late_on_after_the_fast_tries_powers_a_later_plug);
   return UNITY_END();
 }

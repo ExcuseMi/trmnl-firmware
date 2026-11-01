@@ -55,13 +55,19 @@ typedef struct {
   uint8_t keys; // tablet buttons last sent
   int8_t tilt_x, tilt_y;
   uint16_t x, y, pressure; // scaled, last sent
-  uint16_t raw_max_x, raw_max_y, raw_max_p; // the largest raw values seen (logged at removal: checks the maxima)
+  uint16_t raw_max_x, raw_max_y, raw_max_p; // the largest raw values of pen frames (logged at removal)
+  uint32_t pen_frames; // pen frames taken, either mode (logged at removal)
+  bool full_pen; // a full-mode pen frame came: standard reports are ignored from then on
 } usb_pen_t;
 
 void usb_pen_init(usb_pen_t *p, uint16_t vid, uint16_t pid);
 
-// One input report (with its report ID byte) from an interface with `role`: 1 with *out filled, 0 for none (not a
-// pen or button report, too short, a button report that changes nothing, a standard report once full mode runs)
+// One input report (with its report ID byte) from an interface with `role` (STANDARD or FULL): 1 with *out filled, 0
+// for none (not a pen or button report, too short, a button report that changes nothing or not from the FULL interface,
+// a standard report once a full-mode pen frame came). On the X (2026-11-01) the button frames came on interface 2
+// after the switch but no pen frame did, so a pen staying on interface 1 (report 07) is taken until full-mode pen
+// frames come; full-mode pen frames (02, Deco 01 V2 only) count from either interface, report 07 only from interface
+// 1. Byte 1 b0 (x 4: the tablet's answer to the switch, seen as "raw max x 4") and f0 are not pen frames
 int usb_pen_report(usb_pen_t *p, usb_pen_iface_t role, const uint8_t *d, size_t len, app_pen_event_t *out);
 
 // `raw` of 0..`max` to 0..65535 (0 and max are the ends; over max is 65535; max 0 gives 0)

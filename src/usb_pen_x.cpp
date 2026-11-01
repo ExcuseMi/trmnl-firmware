@@ -97,7 +97,9 @@ void usb_pen_x_detach(void) {
   taskEXIT_CRITICAL(&mux);
   if (post && wanted) post_token();
   // the largest raw values seen: checks the assumed full-mode maxima (usb_pen.h)
-  if (had) evlog_add("Pen %04x:%04x gone, raw max x %u y %u p %u", was.vid, was.pid, was.raw_max_x, was.raw_max_y, was.raw_max_p);
+  if (had)
+    evlog_add("Pen %04x:%04x gone, %lu pen frames, raw max x %u y %u p %u", was.vid, was.pid,
+              (unsigned long)was.pen_frames, was.raw_max_x, was.raw_max_y, was.raw_max_p);
 }
 
 void usb_pen_x_report(usb_pen_iface_t role, const uint8_t *d, size_t len) {

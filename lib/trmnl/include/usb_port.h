@@ -98,3 +98,30 @@ void usb_power_reading_init(usb_power_reading_t *r);
 
 // One poll at `now_ms`; returns what usb_port_input_t.power gets
 usb_power_t usb_power_update(usb_power_reading_t *r, uint32_t now_ms, bool got, bool input_power);
+
+// ---- the boost's switch-on ----
+
+// The boost pin is on the expander too, behind the same lock. One 200 ms try on entering host mode failed in a
+// refresh (2026-11-01, "boost not switched on (expander busy)") and a tablet plugged after it got no power until it
+// was replugged. In host mode the caller tries again while the boost is off: every USB_BOOST_FAST_MS for the first
+// USB_BOOST_FAST_TRIES tries (about 1 s), then every USB_BOOST_SLOW_MS for as long as host mode lasts.
+#define USB_BOOST_FAST_MS    250
+#define USB_BOOST_FAST_TRIES 4
+#define USB_BOOST_SLOW_MS    2000
+
+typedef enum {
+  USB_BOOST_LOG_NONE,
+  USB_BOOST_LOG_FAILED, // the fast tries all failed (logged once)
+  USB_BOOST_LOG_ON_LATE, // on, after at least one failed try
+} usb_boost_log_t;
+
+typedef struct {
+  bool on;
+  uint8_t tries; // failed so far
+  uint32_t next_at;
+} usb_boost_t;
+
+void usb_boost_init(usb_boost_t *b, uint32_t now_ms); // host mode began: the first try is due now
+bool usb_boost_due(const usb_boost_t *b, uint32_t now_ms); // off and a try is due
+// A try's result at `now_ms`: what to log
+usb_boost_log_t usb_boost_result(usb_boost_t *b, uint32_t now_ms, bool ok);

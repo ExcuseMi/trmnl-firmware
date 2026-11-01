@@ -125,6 +125,48 @@ void test_standard_reports_ignored_once_full_mode_runs() {
   TEST_ASSERT_EQUAL(1, full(HOVER, sizeof(HOVER)));
   TEST_ASSERT_EQUAL(0, usb_pen_report(&pen, USB_PEN_IFACE_STANDARD, STD, sizeof(STD), &ev));
   TEST_ASSERT_EQUAL(APP_PEN_MODE_FULL, pen.mode);
+  TEST_ASSERT_EQUAL(1u, pen.pen_frames); // one motion, one event
+}
+
+// The X, 2026-11-01: after the switch the tablet answered 02 b0 04.. and sent button frames on interface 2, but the
+// pen never drew ("raw max x 4": the answer was taken as a pen frame, then every report 07 dropped as "full mode runs")
+static const uint8_t ANSWER[] = {0x02, 0xb0, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+static const uint8_t KEY1[] = {0x02, 0xf0, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+void test_the_switch_answer_is_not_a_pen_frame() {
+  TEST_ASSERT_EQUAL(0, full(ANSWER, sizeof(ANSWER)));
+  TEST_ASSERT_EQUAL(0, pen.raw_max_x);
+  TEST_ASSERT_EQUAL(0u, pen.pen_frames);
+  TEST_ASSERT_FALSE(pen.full_pen);
+}
+
+void test_pen_on_interface_1_while_buttons_come_on_2() {
+  TEST_ASSERT_EQUAL(0, full(ANSWER, sizeof(ANSWER)));
+  TEST_ASSERT_EQUAL(1, full(KEY1, sizeof(KEY1)));
+  TEST_ASSERT_EQUAL(APP_EVENT_PEN_KEY, ev.type);
+  TEST_ASSERT_EQUAL(1, full(KEYS_UP, sizeof(KEYS_UP)));
+  TEST_ASSERT_EQUAL(0u, pen.pen_frames); // button frames are not counted as pen frames
+  TEST_ASSERT_EQUAL(0, pen.raw_max_x);
+  TEST_ASSERT_EQUAL(1, usb_pen_report(&pen, USB_PEN_IFACE_STANDARD, STD, sizeof(STD), &ev));
+  TEST_ASSERT_EQUAL(APP_EVENT_PEN, ev.type);
+  TEST_ASSERT_EQUAL(APP_PEN_IN_RANGE | APP_PEN_TIP | APP_PEN_BARREL, ev.flags);
+  TEST_ASSERT_EQUAL(65535, ev.x); // the standard maxima
+  TEST_ASSERT_EQUAL(APP_PEN_MODE_FULL, pen.mode); // the buttons still count
+  TEST_ASSERT_EQUAL(1u, pen.pen_frames);
+  TEST_ASSERT_EQUAL_HEX16(0x7fff, pen.raw_max_x);
+  // full-mode pen frames start: from then on the standard ones are dropped, never one motion twice
+  TEST_ASSERT_EQUAL(1, full(HOVER, sizeof(HOVER)));
+  TEST_ASSERT_EQUAL(0, usb_pen_report(&pen, USB_PEN_IFACE_STANDARD, STD, sizeof(STD), &ev));
+  TEST_ASSERT_EQUAL(2u, pen.pen_frames);
+}
+
+void test_full_pen_frames_taken_from_interface_1_buttons_not() {
+  TEST_ASSERT_EQUAL(1, usb_pen_report(&pen, USB_PEN_IFACE_STANDARD, HOVER, sizeof(HOVER), &ev));
+  TEST_ASSERT_EQUAL(usb_pen_scale(0x02b8, USB_PEN_DECO_MAX_X), ev.x);
+  TEST_ASSERT_EQUAL(0, usb_pen_report(&pen, USB_PEN_IFACE_STANDARD, KEY1, sizeof(KEY1), &ev));
+  TEST_ASSERT_EQUAL(0, pen.keys);
+  usb_pen_init(&pen, USB_PEN_VID_XPPEN, 0x1234); // another XP-Pen: report 02 is not known there
+  TEST_ASSERT_EQUAL(0, usb_pen_report(&pen, USB_PEN_IFACE_STANDARD, HOVER, sizeof(HOVER), &ev));
 }
 
 void test_bad_reports_give_nothing() {
@@ -140,7 +182,7 @@ void test_bad_reports_give_nothing() {
   r[0] = 0x02;
   r[1] = 0x1f; // garbage: no pen bit
   TEST_ASSERT_EQUAL(0, full(r, sizeof(r)));
-  TEST_ASSERT_EQUAL(0, usb_pen_report(&pen, USB_PEN_IFACE_STANDARD, HOVER, sizeof(HOVER), &ev)); // id 02 on 1
+  TEST_ASSERT_EQUAL(0, usb_pen_report(&pen, USB_PEN_IFACE_STANDARD, KEYS_UP, sizeof(KEYS_UP), &ev)); // keys on 1
   TEST_ASSERT_EQUAL(0, usb_pen_report(&pen, USB_PEN_IFACE_STANDARD, STD, 9, &ev)); // short 07
   TEST_ASSERT_EQUAL(0, usb_pen_report(&pen, USB_PEN_IFACE_IGNORE, HOVER, sizeof(HOVER), &ev));
   TEST_ASSERT_EQUAL(0, usb_pen_report(&pen, USB_PEN_IFACE_NONE, STD, sizeof(STD), &ev));
@@ -268,6 +310,9 @@ int main(int argc, char **argv) {
   RUN_TEST(test_pen_events_carry_the_buttons_held);
   RUN_TEST(test_standard_report_07);
   RUN_TEST(test_standard_reports_ignored_once_full_mode_runs);
+  RUN_TEST(test_the_switch_answer_is_not_a_pen_frame);
+  RUN_TEST(test_pen_on_interface_1_while_buttons_come_on_2);
+  RUN_TEST(test_full_pen_frames_taken_from_interface_1_buttons_not);
   RUN_TEST(test_bad_reports_give_nothing);
   RUN_TEST(test_scaling_ends);
   RUN_TEST(test_info);

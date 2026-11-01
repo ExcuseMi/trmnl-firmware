@@ -11,6 +11,7 @@
 #define USB_PROBE_DESC_LINE    24 // descriptor bytes per event line
 #define USB_PROBE_REPORT_BYTES 28 // bytes of one input report shown (one event line is 100 characters)
 #define USB_PROBE_FULL_REPORTS 40 // reports per interface logged in full
+#define USB_PROBE_PEN_REPORTS  20 // reports per pen tablet interface logged in full (then counted, logged at removal)
 #define USB_PROBE_SUMMARY_MS   2000 // then one count line this often
 #define USB_PROBE_HEX_CAP      (USB_PROBE_DESC_LINE * 3 + 1) // enough for a descriptor line or a report
 
@@ -32,6 +33,8 @@ void usb_probe_init(usb_probe_t *p, uint32_t now);
 
 // One report arrived: true while it is among the first USB_PROBE_FULL_REPORTS (log it in full)
 bool usb_probe_report(usb_probe_t *p);
+// The same with `first` reports logged in full
+bool usb_probe_report_upto(usb_probe_t *p, uint32_t first);
 
 // Polled: true when a count line is due (past the full ones, new reports, USB_PROBE_SUMMARY_MS since the last);
 // `*count` is the total

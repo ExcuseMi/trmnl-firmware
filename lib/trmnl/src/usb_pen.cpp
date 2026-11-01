@@ -7,6 +7,7 @@ const uint8_t usb_pen_full_mode_cmd[USB_PEN_CMD_LEN] = {0x02, 0xb0, 0x04, 0x00, 
 #define FULL_ID       0x02
 #define FULL_KEYS     0xf0 // byte 1 of a button frame
 #define FULL_PEN      0x80 // byte 1 of a pen frame has it
+#define FULL_NOT_PEN  0x10 // with FULL_PEN: not a pen frame (f0 buttons; b0, x 4: the tablet's answer to the switch)
 #define FULL_LEAVING  0x40 // with FULL_PEN: the pen left
 #define FULL_IN_RANGE 0x20
 #define STD_ID        0x07
@@ -42,6 +43,7 @@ static void note_max(uint16_t *m, uint16_t v) {
 static int pen_event(usb_pen_t *p, const uint8_t *d, uint8_t flags, uint32_t mx, uint32_t my, uint32_t mp,
                      app_pen_event_t *out) {
   uint16_t rx = u16le(d + 2), ry = u16le(d + 4), rp = u16le(d + 6);
+  if (p->pen_frames != 0xFFFFFFFFu) p->pen_frames++;
   note_max(&p->raw_max_x, rx);
   note_max(&p->raw_max_y, ry);
   note_max(&p->raw_max_p, rp);
@@ -74,10 +76,12 @@ static uint8_t pen_flags(uint8_t b, bool in_range) {
   return f;
 }
 
-static int full_report(usb_pen_t *p, const uint8_t *d, size_t len, app_pen_event_t *out) {
+// `keys_iface`: from the full-mode interface, the only one whose button frames count
+static int full_report(usb_pen_t *p, const uint8_t *d, size_t len, bool keys_iface, app_pen_event_t *out) {
   if (len < 3 || d[0] != FULL_ID) return 0;
   uint8_t b = d[1];
   if (b == FULL_KEYS) {
+    if (!keys_iface) return 0;
     p->mode = APP_PEN_MODE_FULL;
     uint8_t changed = (uint8_t)(d[2] ^ p->keys);
     if (!changed) return 0;
@@ -94,24 +98,27 @@ static int full_report(usb_pen_t *p, const uint8_t *d, size_t len, app_pen_event
     out->changed = changed;
     return 1;
   }
-  if (!(b & FULL_PEN) || len < PEN_BYTES) return 0;
+  if (!(b & FULL_PEN) || (b & FULL_NOT_PEN) || len < PEN_BYTES) return 0;
   p->mode = APP_PEN_MODE_FULL;
+  p->full_pen = true;
   bool in_range = !(b & FULL_LEAVING) && (b & FULL_IN_RANGE);
   return pen_event(p, d, pen_flags(b, in_range), USB_PEN_DECO_MAX_X, USB_PEN_DECO_MAX_Y, USB_PEN_DECO_MAX_P, out);
 }
 
 static int std_report(usb_pen_t *p, const uint8_t *d, size_t len, app_pen_event_t *out) {
-  if (p->mode == APP_PEN_MODE_FULL) return 0; // the switch worked: interface 2 has it all
+  if (p->full_pen) return 0; // full-mode pen frames come: one motion is never sent twice
   if (len < PEN_BYTES || d[0] != STD_ID) return 0;
-  p->mode = APP_PEN_MODE_STANDARD;
+  if (p->mode == APP_PEN_MODE_NONE) p->mode = APP_PEN_MODE_STANDARD; // full stays: its buttons still come
   return pen_event(p, d, pen_flags(d[1], d[1] & STD_IN_RANGE), USB_PEN_STD_MAX_XY, USB_PEN_STD_MAX_XY,
                    USB_PEN_STD_MAX_P, out);
 }
 
 int usb_pen_report(usb_pen_t *p, usb_pen_iface_t role, const uint8_t *d, size_t len, app_pen_event_t *out) {
   if (!p || !d || !out) return 0;
-  if (role == USB_PEN_IFACE_FULL) return full_report(p, d, len, out);
-  if (role == USB_PEN_IFACE_STANDARD) return std_report(p, d, len, out);
+  if (role != USB_PEN_IFACE_FULL && role != USB_PEN_IFACE_STANDARD) return 0;
+  if (len && d[0] == FULL_ID && p->pid == USB_PEN_PID_DECO01V2)
+    return full_report(p, d, len, role == USB_PEN_IFACE_FULL, out);
+  if (len && d[0] == STD_ID && role == USB_PEN_IFACE_STANDARD) return std_report(p, d, len, out);
   return 0;
 }
 

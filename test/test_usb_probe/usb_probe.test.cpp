@@ -80,8 +80,19 @@ void test_counter_does_not_wrap() {
   TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFu, p.total);
 }
 
+// A pen tablet's interfaces: their first USB_PROBE_PEN_REPORTS logged, all counted (the X's pen run, 2026-11-01)
+void test_report_upto_logs_the_first_ones_counts_all() {
+  usb_probe_t p;
+  usb_probe_init(&p, 0);
+  int logged = 0;
+  for (int i = 0; i < 100; i++) logged += usb_probe_report_upto(&p, USB_PROBE_PEN_REPORTS);
+  TEST_ASSERT_EQUAL(USB_PROBE_PEN_REPORTS, logged);
+  TEST_ASSERT_EQUAL_UINT32(100, p.total);
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
+  RUN_TEST(test_report_upto_logs_the_first_ones_counts_all);
   RUN_TEST(test_hex_formats_and_stops_at_whole_bytes);
   RUN_TEST(test_a_full_line_fits_the_hex_cap);
   RUN_TEST(test_descriptor_lines_cover_it_once_and_are_bounded);

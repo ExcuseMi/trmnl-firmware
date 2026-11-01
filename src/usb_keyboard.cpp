@@ -88,15 +88,14 @@ static void iface_cb(hid_host_device_handle_t h, const hid_host_interface_event_
     uint8_t d[64];
     size_t n = 0;
     if (hid_host_device_get_raw_input_report_data(h, d, sizeof(d), &n) != ESP_OK) break;
-    if (ps && ps->pen != USB_PEN_IFACE_NONE) { // parsed here: 200 reports a second, not through the port task
-      usb_pen_x_report(ps->pen, d, n);
-      break;
-    }
+    bool pen = ps && ps->pen != USB_PEN_IFACE_NONE;
+    if (pen) usb_pen_x_report(ps->pen, d, n); // parsed here: 200 reports a second, not through the port task
     r.len = (uint8_t)(n < sizeof(r.data) ? n : sizeof(r.data));
     memcpy(r.data, d, r.len);
     if (ps) {
       r.seq = ps->pr.total + 1;
-      if (!usb_probe_report(&ps->pr)) break; // counted; past the first ones not queued
+      // counted; past the first ones not queued (a tablet's first ones are logged too: which interface sends what)
+      if (!usb_probe_report_upto(&ps->pr, pen ? USB_PROBE_PEN_REPORTS : USB_PROBE_FULL_REPORTS)) break;
     }
     xQueueSend(report_q, &r, 0); // a full queue drops it; never wait in the driver's task
     break;
@@ -169,6 +168,11 @@ static bool host_start(void) {
   return true;
 }
 
+// A tablet interface's report count at removal: which interface sent at all
+static void log_pen_gone(const probe_slot_t &ps) {
+  evlog_add("Pen i%u gone after %lu reports", ps.iface, (unsigned long)ps.pr.total);
+}
+
 // Stops the USB stack; false if it did not stop by `deadline`
 static bool host_stop(uint32_t deadline) {
   if (open_dev) {
@@ -179,7 +183,10 @@ static bool host_stop(uint32_t deadline) {
   bool had_pen = false;
   for (probe_slot_t &ps : probes) {
     if (ps.h) hid_host_device_close(ps.h);
-    if (ps.h && ps.pen != USB_PEN_IFACE_NONE) had_pen = true;
+    if (ps.h && ps.pen != USB_PEN_IFACE_NONE) {
+      had_pen = true;
+      log_pen_gone(ps);
+    }
     ps.h = nullptr;
   }
   if (had_pen) usb_pen_x_detach();
@@ -310,7 +317,8 @@ static void drain_reports(void) {
   app_event_t ev[HID_KEYS_MAX_EVENTS];
   for (probe_slot_t &ps : probes) {
     uint32_t n;
-    if (ps.h && usb_probe_summary(&ps.pr, millis(), &n)) evlog_add("HID i%u: %lu reports", ps.iface, (unsigned long)n);
+    if (ps.h && ps.pen == USB_PEN_IFACE_NONE && usb_probe_summary(&ps.pr, millis(), &n)) // a tablet's: at removal
+      evlog_add("HID i%u: %lu reports", ps.iface, (unsigned long)n);
   }
   uint8_t mode = usb_pen_x_mode();
   if (mode != pen_mode_logged && pen_open()) { // the mode the tablet's data came in
@@ -323,6 +331,7 @@ static void drain_reports(void) {
     if (r.probe) {
       probe_slot_t &ps = probes[r.probe - 1];
       if (r.gone && ps.pen != USB_PEN_IFACE_NONE) {
+        log_pen_gone(ps);
         if (!pen_open()) usb_pen_x_detach(); // its last interface
       } else if (r.gone) {
         evlog_add("HID i%u gone after %lu reports", ps.iface, (unsigned long)ps.pr.total);
@@ -352,6 +361,9 @@ static void port_loop(void *arg) {
   usb_port_mode_t applied = USB_PORT_DEVICE;
   usb_port_why_t why = port.why;
   bool was_open = false;
+  usb_boost_t bst;
+  usb_boost_init(&bst, millis());
+  bst.on = true; // device mode: nothing to switch on
   while (true) {
     hid_host_device_handle_t h;
     if (xQueueReceive(conn_q, &h, pdMS_TO_TICKS(USB_PORT_POLL_MS)) == pdTRUE && applied == USB_PORT_HOST) {
@@ -374,10 +386,7 @@ static void port_loop(void *arg) {
     if (mode == USB_PORT_HOST && applied == USB_PORT_DEVICE) {
       if (host_start()) {
         applied = USB_PORT_HOST;
-        if (!boost(true, 200)) {
-          Log_error("USB keys: boost not switched on (expander busy)");
-          evlog_add("USB keys: boost not switched on (expander busy)");
-        }
+        usb_boost_init(&bst, millis());
       }
     } else if (mode == USB_PORT_DEVICE && applied == USB_PORT_HOST) {
       if (was_open) evlog_add("USB keys: host mode dropped with a keyboard on: %s", usb_port_why_str(why));
@@ -401,6 +410,15 @@ static void port_loop(void *arg) {
         keyboards_post_change();
       }
       applied = USB_PORT_DEVICE;
+    }
+    if (applied == USB_PORT_HOST && usb_boost_due(&bst, millis())) { // retried while off (usb_port.h)
+      usb_boost_log_t l = usb_boost_result(&bst, millis(), boost(true, 200));
+      if (l == USB_BOOST_LOG_FAILED) {
+        Log_error("USB keys: boost not switched on (expander busy), trying every %d ms", USB_BOOST_SLOW_MS);
+        evlog_add("USB keys: boost not switched on after %d tries (expander busy), trying on", USB_BOOST_FAST_TRIES);
+      } else if (l == USB_BOOST_LOG_ON_LATE) {
+        evlog_add("USB keys: boost on after %u failed tries", bst.tries);
+      }
     }
     if (stop_task && applied == USB_PORT_DEVICE) break;
   }

@@ -103,3 +103,23 @@ usb_power_t usb_power_update(usb_power_reading_t *r, uint32_t now, bool got, boo
   }
   return r->last;
 }
+
+// ---- the boost's switch-on ----
+
+void usb_boost_init(usb_boost_t *b, uint32_t now_ms) {
+  b->on = false;
+  b->tries = 0;
+  b->next_at = now_ms;
+}
+
+bool usb_boost_due(const usb_boost_t *b, uint32_t now_ms) { return !b->on && (int32_t)(now_ms - b->next_at) >= 0; }
+
+usb_boost_log_t usb_boost_result(usb_boost_t *b, uint32_t now_ms, bool ok) {
+  if (ok) {
+    b->on = true;
+    return b->tries ? USB_BOOST_LOG_ON_LATE : USB_BOOST_LOG_NONE;
+  }
+  if (b->tries != 0xFF) b->tries++;
+  b->next_at = now_ms + (b->tries < USB_BOOST_FAST_TRIES ? USB_BOOST_FAST_MS : USB_BOOST_SLOW_MS);
+  return b->tries == USB_BOOST_FAST_TRIES ? USB_BOOST_LOG_FAILED : USB_BOOST_LOG_NONE;
+}
