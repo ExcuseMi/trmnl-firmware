@@ -50,6 +50,7 @@
 #include "app_net_browse.h"
 #include "app_settings_store.h"
 #include "x_devset_x.h"
+#include "app_idle_x.h"
 #include "app_settings_x.h"
 #include "kbd_layout_x.h"
 #include "displayed_image.h"
@@ -351,6 +352,13 @@ static int device_page_open(const char *section) {
   int rc = app_launch_page(&launch_next, section, app_host.name);
   Log_event("Apps: %s asks for the phone page at %s (%d)", app_host.name, section ? section : "?", rc);
   return rc;
+}
+
+// ---- API 2.13: an app that works without input keeps the X ----
+
+static int app_idle_hold_call(int on) {
+  app_idle_x_hold(on != 0);
+  return 0;
 }
 
 static int file_rename(const char *from, const char *to) {
@@ -662,6 +670,7 @@ static const app_api_t table = {
     net_browse,
     x_devset_get,    x_devset_set,
     device_page_open,
+    app_idle_hold_call,
 };
 
 const app_api_t *app_api_table(void) {

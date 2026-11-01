@@ -23,11 +23,12 @@ extern "C" {
 
 #define APP_API_VERSION 2 // 2: keyboards, USB drive, Wi-Fi page (docs/apps.md "API 2")
 // Calls added to a version without a new one: an app checks api->size >= APP_API_SLOT(n + 1) before call n
-#define APP_API_MINOR 12 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
+#define APP_API_MINOR 13 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
                         // 2.4: ESP-NOW receive, touch hold; 2.5: orientation from the accelerometer;
                         // 2.6: keyboard layout, settings form; 2.7: USB pen tablet;
                         // 2.8: other apps' files, read only; 2.9: app_launch, app_arg;
-                        // 2.10: net_browse; 2.11: device settings; 2.12: device_page_open
+                        // 2.10: net_browse; 2.11: device settings; 2.12: device_page_open;
+                        // 2.13: app_idle_hold
 
 // ---- app header ----
 
@@ -629,6 +630,15 @@ typedef struct app_api {
   // The page's QR carries the section; typing the code opens the start. Nothing opens at once; it replaces an
   // app_launch and the other way round, and is lost like one (long press, error, crash). 0 or APP_EINVAL
   int (*device_page_open)(const char *section);
+
+  // ---- API 2.13 (api->size >= APP_API_SLOT(60)): staying open without input ----
+
+  // An app left alone goes back to TRMNL after the idle limit (device setting app_idle_min, the app's own override on
+  // the phone page): no touch, key, pen or mouse input for that long, then APP_EVENT_EXIT as for a long press, and it
+  // is not resumed after the next wake. An app that works without input (telemetry coming in, a running timer) calls
+  // app_idle_hold(1) while it does and app_idle_hold(0) when it stops: while held the timer does not run, and letting
+  // go starts a full idle stretch. Returns 0
+  int (*app_idle_hold)(int on);
 } app_api_t;
 
 #define APP_ORIENT_SETTLE_MS 1000
@@ -668,7 +678,8 @@ APP_API_ASSERT(offsetof(app_api_t, app_launch) == APP_API_SLOT(53), "API 2.9: la
 APP_API_ASSERT(offsetof(app_api_t, net_browse) == APP_API_SLOT(55), "API 2.10: net_browse after launching");
 APP_API_ASSERT(offsetof(app_api_t, device_setting_set) == APP_API_SLOT(57), "API 2.11: device settings after net_browse");
 APP_API_ASSERT(offsetof(app_api_t, device_page_open) == APP_API_SLOT(58), "API 2.12: the phone page after settings");
-APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(59), "API 2.12 has 59 calls: a new one raises APP_API_MINOR");
+APP_API_ASSERT(offsetof(app_api_t, app_idle_hold) == APP_API_SLOT(59), "API 2.13: the idle hold after the phone page");
+APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(60), "API 2.13 has 60 calls: a new one raises APP_API_MINOR");
 APP_API_ASSERT(sizeof(app_pen_event_t) == sizeof(app_event_t), "a pen event fills an app_event_t");
 APP_API_ASSERT(offsetof(app_pen_event_t, x) == 2 && offsetof(app_pen_event_t, tilt_x) == 8 &&
                    offsetof(app_pen_event_t, changed) == 11, "app_pen_event_t is part of the app ABI");
@@ -678,6 +689,6 @@ APP_API_ASSERT(sizeof(app_espnow_pkt_t) == 258, "app_espnow_pkt_t is part of the
 APP_API_ASSERT(sizeof(app_local_time_t) == 16, "app_local_time_t is part of the app ABI");
 APP_API_ASSERT(sizeof(app_setting_decl_t) == 3 * sizeof(void *) + 12 + (sizeof(void *) == 8 ? 4 : 0),
                "app_setting_decl_t is part of the app ABI");
-APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 12, "a new version adds its own size check above");
+APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 13, "a new version adds its own size check above");
 
 #endif // APP_API_H

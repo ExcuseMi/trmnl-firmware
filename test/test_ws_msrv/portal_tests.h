@@ -5,6 +5,7 @@
 #include <unity.h>
 
 #include <app_decl_store.h>
+#include <app_idle.h>
 
 #include "harness.h"
 
@@ -186,6 +187,31 @@ static void test_portal_device_settings_and_printer() {
   TEST_ASSERT_EQUAL(500, status(post("/api/device", "k=mouse_speed&v=fast", c)));
 }
 
+// Apps > Configure: an app's own idle limit, kept as a device setting under a key made of its name
+static void test_portal_app_idle_override() {
+  std::string c = start_portal();
+  TEST_ASSERT_EQUAL(401, status(get("/api/appidle?app=writer")));
+  TEST_ASSERT_EQUAL(401, status(post("/api/appidle?app=writer", "v=off", c, "application/x-www-form-urlencoded", 1460, false)));
+  TEST_ASSERT_EQUAL(0u, PF.dev.size());
+  std::string r = get("/api/appidle?app=writer", c);
+  TEST_ASSERT_EQUAL(200, status(r));
+  TEST_ASSERT_TRUE_MESSAGE(body(r).find("\"v\":\"default\"") != std::string::npos, body(r).c_str());
+  TEST_ASSERT_EQUAL(400, status(post("/api/appidle?app=writer", "v=7", c)));
+  TEST_ASSERT_EQUAL(400, status(post("/api/appidle?app=writer", "v=", c)));
+  TEST_ASSERT_EQUAL(400, status(post("/api/appidle?app=..%2Fx", "v=off", c)));
+  TEST_ASSERT_EQUAL(0u, PF.dev.size());
+  TEST_ASSERT_EQUAL(200, status(post("/api/appidle?app=writer", "v=30", c)));
+  char key[16];
+  TEST_ASSERT_TRUE(app_idle_app_key("writer", key, sizeof(key)));
+  TEST_ASSERT_EQUAL_STRING("30", PF.dev[key].c_str());
+  TEST_ASSERT_EQUAL(1u, PF.dev.size()); // the other apps are untouched
+  r = get("/api/appidle?app=writer", c);
+  TEST_ASSERT_TRUE_MESSAGE(body(r).find("\"v\":\"30\"") != std::string::npos, body(r).c_str());
+  TEST_ASSERT_TRUE(body(get("/api/appidle?app=fpv", c)).find("\"v\":\"default\"") != std::string::npos);
+  PF.dev_set_fails = true; // flash full
+  TEST_ASSERT_EQUAL(500, status(post("/api/appidle?app=writer", "v=off", c)));
+}
+
 static void test_portal_printers_and_bluetooth() {
   std::string c = start_portal();
   nb_list_add(&PF.found, "Brother MFC", "192.168.1.50", 631, "ipp/print");
@@ -207,6 +233,7 @@ void run_portal_tests() {
   RUN_TEST(test_portal_needs_login_and_the_portal_env);
   RUN_TEST(test_portal_other_apps_settings_checked);
   RUN_TEST(test_portal_device_settings_and_printer);
+  RUN_TEST(test_portal_app_idle_override);
   RUN_TEST(test_portal_printers_and_bluetooth);
   run_radio_tests();
 }

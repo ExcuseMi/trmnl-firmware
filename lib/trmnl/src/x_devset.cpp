@@ -11,7 +11,18 @@ static const xds_key_t KEYS[] = {
     {"pen_area", "Pen tablet area", "fill", "fill|keep", 0, 0},
     {"mouse_speed", "Mouse speed", "normal", "slow|normal|fast", 0, 0},
     {"cleanup_s", "Clean-up flash after (seconds idle, 0 off)", "5", nullptr, 0, 600},
+    {"app_idle_min", "Close an app after (minutes without input)", "10", "off|5|10|15|30|60", 0, 0},
 };
+// An app's own limit, key "i_" + 8 hex (app_idle.h): not listed, found by its shape
+static const xds_key_t APP_IDLE = {"i_", "Close this app after", "default", "default|off|5|10|15|30|60", 0, 0};
+
+static bool app_idle_key(const char *key) {
+  if (!key || strlen(key) != 10 || key[0] != 'i' || key[1] != '_') return false;
+  for (int i = 2; i < 10; i++) {
+    if (!((key[i] >= '0' && key[i] <= '9') || (key[i] >= 'a' && key[i] <= 'f'))) return false;
+  }
+  return true;
+}
 #define N_KEYS ((int)(sizeof(KEYS) / sizeof(KEYS[0])))
 
 const xds_key_t *xds_keys(int *n) {
@@ -20,6 +31,7 @@ const xds_key_t *xds_keys(int *n) {
 }
 
 const xds_key_t *xds_find(const char *key) {
+  if (app_idle_key(key)) return &APP_IDLE;
   for (int i = 0; key && i < N_KEYS; i++) {
     if (!strcmp(KEYS[i].key, key)) return &KEYS[i];
   }

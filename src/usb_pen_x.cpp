@@ -11,6 +11,7 @@
 #include <usb/usb_host.h>
 
 #include "app_host.h"
+#include "app_idle_x.h"
 #include "evlog.h"
 
 int usb_keyboard_pen(bool on); // usb_keyboard.cpp: the port in host mode for the pen as for keys
@@ -138,6 +139,7 @@ void usb_pen_x_detach(void) {
 }
 
 void usb_pen_x_report(usb_pen_iface_t role, const uint8_t *d, size_t len) {
+  app_idle_x_note(); // any report, hover and tablet buttons too, is a person (also when the app asked for none)
   app_pen_event_t e;
   usb_cursor_out_t o = {};
   taskENTER_CRITICAL(&mux);
@@ -194,6 +196,7 @@ void usb_pen_x_mouse_detach(void) {
 
 void usb_pen_x_mouse_report(const usb_mouse_layout_t *l, const uint8_t *d, size_t len) {
   usb_mouse_move_t mv;
+  app_idle_x_note(); // a mouse report is a person, also for an app that did not ask for the mouse
   if (!wanted || !usb_mouse_report(l, d, len, &mv)) return; // no mouse events for an app that did not ask
   usb_cursor_out_t o;
   taskENTER_CRITICAL(&mux);

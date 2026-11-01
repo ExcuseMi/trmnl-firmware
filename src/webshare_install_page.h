@@ -36,7 +36,8 @@ canvas{width:40px;height:40px;border:1px solid var(--line);border-radius:.35rem;
 <div id=msg hidden></div>
 <div id=t-apps>
 <section><h2>Apps</h2><div id=apps></div></section>
-<section id=cfg hidden><h2 id=cfgname></h2><form id=cfgform></form><button id=cfgsave>Save</button>
+<section id=cfg hidden><h2 id=cfgname></h2><div class=f><label>Close this app after</label><select id=cfgidle></select></div>
+<form id=cfgform></form><button id=cfgsave>Save</button>
 <p class=s>The app reads the new values when it starts next (or at once if it runs).</p></section>
 <section><h2>Install or update</h2><input id=up type=file accept=".elf" multiple>
 <p class=s>Every file is checked before it is kept. An app with the same name is kept as .elf.bak until the new one has
@@ -50,6 +51,7 @@ started once. From a computer: <code>curl -F file=@app.elf "http://&lt;this addr
 </div>
 <div id=t-me hidden>
 <section><h2>This X</h2><div id=me></div><p id=kbd></p></section>
+<section><h2>Apps</h2><p class=s>An app that gets no touch, key or pen input goes back to TRMNL after this long.</p><div id=idle></div></section>
 <section><h2>Wi-Fi</h2><div id=wifi></div><button id=scan>Change network</button><div id=nets></div></section>
 <section><h2>Touch bar</h2><div id=bar><button data-b=left>Left</button> <button data-b=middle>Middle</button>
 <button data-b=right>Right</button> <button data-b=long>Long press</button> <button data-b=stop>Stop page</button></div></section>
@@ -97,14 +99,18 @@ function go(){const h=decodeURIComponent(location.hash.slice(1));if(!h)return;hi
 let cfgApp='';
 async function configure(id,name){
   const r=await api('/api/appsettings?app='+encodeURIComponent(id));
-  if(!r.ok){say(r.j.error||'Failed',true);return}
-  cfgApp=id;$('cfg').hidden=false;$('cfgname').textContent=name+' settings';const f=$('cfgform');f.textContent='';
-  for(const x of r.j.fields){const w=el('div',null,'f');w.appendChild(el('label',x.l));let i;
+  if(!r.ok&&r.status!=404){say(r.j.error||'Failed',true);return}
+  cfgApp=id;$('cfg').hidden=false;idleLoad(id);$('cfgname').textContent=name+' settings';const f=$('cfgform');f.textContent='';
+  for(const x of r.ok?r.j.fields:[]){const w=el('div',null,'f');w.appendChild(el('label',x.l));let i;
     if(x.t=='choice'){i=el('select');x.choices.forEach(c=>{const o=el('option',c);o.value=c;i.appendChild(o)});i.value=x.v}
     else{i=el('input');i.type=x.t=='secret'?'password':x.t=='number'?'number':'text';
       if(x.t=='secret')i.placeholder=x.set?'(set; type to change)':'(not set)';else i.value=x.v||''}
     i.name='v_'+x.k;i.dataset.secret=x.t=='secret'?1:'';w.appendChild(i);f.appendChild(w)}
   $('cfg').scrollIntoView()}
+const IDLE=['default','off','5','10','15','30','60'],idleName=c=>c=='default'?'Use the device setting':c=='off'?'Never':c+' minutes';
+async function idleLoad(id){const i=$('cfgidle'),r=await api('/api/appidle?app='+encodeURIComponent(id));i.textContent='';
+  IDLE.forEach(c=>{const o=el('option',idleName(c));o.value=c;i.appendChild(o)});i.value=r.ok?r.j.v:'default';
+  i.onchange=async()=>{const x=await post('/api/appidle?app='+encodeURIComponent(id),enc({v:i.value}));say(x.ok?'Saved.':(x.j.error||'Failed'),!x.ok)}}
 $('cfgsave').onclick=async()=>{const o={};
   $('cfgform').querySelectorAll('[name]').forEach(i=>{if(i.dataset.secret&&!i.value)return;o[i.name]=i.value});
   const r=await post('/api/appsettings?app='+encodeURIComponent(cfgApp),enc(o));
@@ -121,6 +127,7 @@ async function devices(){
         const x=await post('/api/printertest');say(x.ok?'The X prints the test page now.':(x.j.error||'Failed'),!x.ok)};d.appendChild(t);
         const c=el('button','Clear');c.onclick=()=>setdev('printer','');d.appendChild(c)}
       p.appendChild(d);continue}
+    if(s.k=='app_idle_min')continue;
     const w=el('div',null,'f');w.appendChild(el('label',s.l));let i;
     if(s.choices){i=el('select');s.choices.split('|').forEach(c=>{const o=el('option',c);o.value=c;i.appendChild(o)})}
     else{i=el('input');i.type='number';i.min=s.min;i.max=s.max}
@@ -178,7 +185,12 @@ async function me(){const r=await api('/api/x');if(!r.ok)return;const m=$('me');
   [['Name',r.j.name],['Firmware',r.j.version]].forEach(([k,v])=>{
     const d=el('div',null,'row');d.appendChild(el('span',k,'n'));d.appendChild(el('span',v));m.appendChild(d)});
   const w=$('wifi');w.textContent='';const d=el('div',null,'row');d.appendChild(el('span','Saved network','n'));
-  d.appendChild(el('span',r.j.wifi?r.j.wifi+(r.j.wifi5?' (5 GHz)':' (2.4 GHz)'):'none saved'));w.appendChild(d)}
+  d.appendChild(el('span',r.j.wifi?r.j.wifi+(r.j.wifi5?' (5 GHz)':' (2.4 GHz)'):'none saved'));w.appendChild(d);
+  const dv=await api('/api/devices'),b=$('idle');b.textContent='';
+  const s=dv.ok&&dv.j.settings.find(x=>x.k=='app_idle_min');if(s){const f=el('div',null,'f');f.appendChild(el('label',s.l));
+    const i=el('select');s.choices.split('|').forEach(c=>{const o=el('option',c=='off'?'Never':c+' minutes');o.value=c;i.appendChild(o)});
+    i.value=s.v;i.onchange=async()=>{const x=await post('/api/device',enc({k:s.k,v:i.value}));say(x.ok?'Saved.':(x.j.error||'Failed'),!x.ok)};
+    f.appendChild(i);b.appendChild(f)}}
 $('go').onclick=async()=>{
   const r=await post('/api/login','pin='+encodeURIComponent($('pin').value));
   if(r.ok){say('');load();me()}else say(r.j.error||'Failed',true)};

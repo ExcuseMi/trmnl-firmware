@@ -33,6 +33,7 @@
 #include <algorithm>
 
 #include "app_host.h"
+#include "app_idle_x.h"
 #include "app_settings_store.h"
 #include "ble_keyboard.h"
 #include "evlog.h"
@@ -116,7 +117,10 @@ static uint32_t last_key_byte;
 
 static void post(const app_event_t &ev) {
   if (!app_host.events) return; // a firmware screen (Install via Wi-Fi): no app to take it
-  if (ev.type != APP_EVENT_ORIENTATION) app_host.got_input = true; // turning the X proves no working touch bar
+  if (ev.type != APP_EVENT_ORIENTATION) {
+    app_host.got_input = true; // turning the X proves no working touch bar
+    app_idle_x_note();
+  }
   if (xQueueSend(app_host.events, &ev, 0) != pdTRUE) Log_info("Apps: event queue full, event dropped");
 }
 
@@ -134,6 +138,7 @@ static void post_tap(int channel, uint8_t gesture) {
 static bool pump_touch(void) {
   touch_event_t evs[TOUCHBAR_INPUT_MAX];
   int n = touchbar_input_poll(evs);
+  if (n > 0) app_idle_x_note(); // any touch, also one the app does not get
   bool long_press = false;
   for (int i = 0; i < n; i++) {
     if (evs[i].gesture == touch_gesture_t::TAP) post_tap(evs[i].channel, APP_GESTURE_TAP);
@@ -233,13 +238,15 @@ static const char *app_load(const char *path, esp_elf_t *elf, app_info_t *info) 
   return nullptr;
 }
 
-static bool app_exit_asked; // a long press asked the running app to exit
+static bool app_exit_asked; // a long press or the idle limit asked the running app to exit
+static int app_idle_closed_min; // > 0: the idle limit did (after that many minutes)
 
 // Waits for the app to end, pumping its input. Returns false if it was told to exit and did not
 // within APP_EXIT_GRACE_MS.
 static bool app_supervise(PreferencesPersistence &persistence) {
   uint32_t started = millis();
   app_exit_asked = false;
+  app_idle_closed_min = 0;
   bool marked_started = false, marked_input = false;
   uint32_t exit_asked = 0;
   while (xSemaphoreTake(app_host.done, pdMS_TO_TICKS(APP_POLL_MS)) != pdTRUE) {
@@ -272,6 +279,20 @@ static bool app_supervise(PreferencesPersistence &persistence) {
       exit_asked = millis();
       app_exit_asked = true;
     }
+    if (!exit_asked && app_idle_x_poll() == APP_IDLE_EXPIRED) {
+      // Like a long press, and not resumed after the next wake: a timed-out app is quit, not interrupted
+      app_idle_closed_min = app_idle_x_minutes();
+      Log_event("Apps: %s idle for %d min - asking it to exit", app_host.name, app_idle_closed_min);
+      evlog_add("Apps: %s closed after %d min idle", app_host.name, app_idle_closed_min);
+      app_idle_close(persistence);
+      app_event_t ev = {};
+      ev.type = APP_EVENT_EXIT;
+      xQueueReset(app_host.events);
+      usb_pen_x_token_taken();
+      post(ev);
+      exit_asked = millis();
+      app_exit_asked = true;
+    }
     // An import under way finishes first (a cut would be safe, the journal, but slower to redo)
     if (usb_drive_importing()) exit_asked = exit_asked ? millis() : 0;
     if (exit_asked && millis() - exit_asked >= APP_EXIT_GRACE_MS) return false;
@@ -293,6 +314,7 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   snprintf(app_host.dir, sizeof(app_host.dir), APPS_DATA_DIR "/%s", app_host.name);
   Log_event("Apps: starting %s", path);
   app_resume_starting(persistence, path);
+  app_idle_x_begin(app_host.name);
   app_install_start(persistence, webshare_fs_root(), app_host.name); // a new version installed over Wi-Fi
 
   static esp_elf_t elf;
@@ -349,7 +371,8 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   int code = app_host.code;
   evlog_crash_app(nullptr, 0);
   // why it ended: the user's long press, the app quitting by itself (return or exit), or its error
-  const char *how = app_exit_asked ? "after a long press" : code == 0 ? "quit by itself" : "error";
+  app_idle_x_end();
+  const char *how = app_idle_closed_min ? "closed by the idle limit" : app_exit_asked ? "after a long press" : code == 0 ? "quit by itself" : "error";
   Log_event("Apps: %s ended with %d (%s)", app_host.name, code, how);
   keyboards_end(); // the USB port back in device mode before anything else
   usb_port_give(usb_port_role()); // whatever still holds the PHY: serial again (usb_port_role.h)

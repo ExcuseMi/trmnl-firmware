@@ -5,6 +5,7 @@
 #include <kbd_layout.h>
 
 #include "app_host.h"
+#include "app_idle_x.h"
 #include "ble_keyboard.h"
 #include "kbd_layout_x.h"
 #include "keyboards.h"
@@ -28,7 +29,10 @@ uint32_t keyboards_status(void) {
 void keyboards_post(const app_event_t *ev, int n) {
   for (int i = 0; i < n; i++) {
     if (!app_host.events) continue;
-    if (ev[i].type != APP_EVENT_KEYBOARD) app_host.got_input = true;
+    if (ev[i].type != APP_EVENT_KEYBOARD) {
+      app_host.got_input = true;
+      app_idle_x_note(); // a key of a USB or Bluetooth keyboard is a person
+    }
     app_event_t e = ev[i];
     kbd_layout_apply_for_app(app_host.key_chars, kbd_layout_x_current(), &e); // asked: APP_KEY_CHAR by the layout
     xQueueSend(app_host.events, &e, 0);

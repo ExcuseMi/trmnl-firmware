@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "app_decl_store.h"
+#include "app_idle.h"
 #include "x_devset.h"
 #include "ws_page_json.h"
 
@@ -166,6 +167,31 @@ static void handle_device_set(WsRequest &r) {
   ws_send_json(r, 200, "{\"ok\":true}");
 }
 
+// An app's own idle limit (Apps > Configure): a device setting under a key made of the app's name, so the app
+// never sees or changes it. GET: {"v": a limit}; POST v=
+static void handle_app_idle_get(WsRequest &r) {
+  if (!ws_install_allowed(r)) return ws_send_error(r, 401, "type the code first");
+  char app[32], key[APP_IDLE_KEY_MAX + 1], v[16];
+  if (!app_param(r, app, sizeof(app)) || !app_idle_app_key(app, key, sizeof(key))) return;
+  int got = P()->dev_get(key, v, sizeof(v) - 1);
+  if (got > 0) v[got] = '\0';
+  JsonDocument d;
+  d["v"] = got > 0 ? v : "default";
+  ws_send_doc(r, 200, d);
+}
+
+static void handle_app_idle_set(WsRequest &r) {
+  if (!ws_install_allowed(r)) return ws_send_error(r, 401, "type the code first");
+  char app[32], key[APP_IDLE_KEY_MAX + 1], v[16] = "", why[64];
+  if (!app_param(r, app, sizeof(app)) || !app_idle_app_key(app, key, sizeof(key))) return;
+  if (!r.param("v", true, v, sizeof(v))) return ws_send_error(r, 400, "no value");
+  size_t len = strlen(v);
+  if (xds_check(key, v, len, why, sizeof(why))) return ws_send_error(r, 400, why[0] ? why : "not a valid limit");
+  if (P()->dev_set(key, v, len) != 0) return ws_send_error(r, 500, "could not save (flash full?)");
+  WP.env->log("webshare: %s idle limit saved", app);
+  ws_send_json(r, 200, "{\"ok\":true}");
+}
+
 static void handle_printers_find(WsRequest &r) {
   if (!ws_install_allowed(r)) return ws_send_error(r, 401, "type the code first");
   nb_list_t *l = (nb_list_t *)WP.env->big_alloc(sizeof(nb_list_t));
@@ -211,6 +237,8 @@ const ws_route_t WS_ROUTES_PORTAL[] = {
     {WS_GET, "/api/appinfo", handle_app_info, nullptr, nullptr},
     {WS_GET, "/api/appsettings", handle_app_settings_get, nullptr, nullptr},
     {WS_POST, "/api/appsettings", handle_app_settings_set, nullptr, nullptr},
+    {WS_GET, "/api/appidle", handle_app_idle_get, nullptr, nullptr},
+    {WS_POST, "/api/appidle", handle_app_idle_set, nullptr, nullptr},
     {WS_GET, "/api/devices", handle_devices, nullptr, nullptr},
     {WS_POST, "/api/device", handle_device_set, nullptr, nullptr},
     {WS_POST, "/api/printers", handle_printers_find, nullptr, nullptr},

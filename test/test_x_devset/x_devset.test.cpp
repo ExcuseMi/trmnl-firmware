@@ -1,5 +1,6 @@
 // The device settings' checks (x_devset.h) and the USB devices seen (usb_seen.h)
 #include <app_api.h>
+#include <app_idle.h>
 #include <string.h>
 #include <unity.h>
 #include <usb_seen.h>
@@ -34,14 +35,37 @@ void test_choices_numbers_and_unknown_keys() {
   TEST_ASSERT_EQUAL(APP_EINVAL, check("cleanup_s", "601"));
   TEST_ASSERT_EQUAL(APP_EINVAL, check("cleanup_s", "-1"));
   TEST_ASSERT_EQUAL(APP_EINVAL, check("cleanup_s", "5s"));
+  TEST_ASSERT_EQUAL(0, check("app_idle_min", "off"));
+  TEST_ASSERT_EQUAL(0, check("app_idle_min", "60"));
+  TEST_ASSERT_EQUAL(APP_EINVAL, check("app_idle_min", "7"));
+  TEST_ASSERT_EQUAL(APP_EINVAL, check("app_idle_min", "default")); // only an app's own choice has it
   TEST_ASSERT_EQUAL(APP_ENOENT, check("wifi_pass", "x"));
   TEST_ASSERT_EQUAL(APP_ENOENT, xds_check(nullptr, "x", 1, nullptr, 0));
   int n = 0;
   const xds_key_t *k = xds_keys(&n);
-  TEST_ASSERT_EQUAL(4, n);
+  TEST_ASSERT_EQUAL(5, n);
   for (int i = 0; i < n; i++) { // every default passes its own check
     if (k[i].def[0]) TEST_ASSERT_EQUAL_MESSAGE(0, check(k[i].key, k[i].def), k[i].key);
   }
+}
+
+// An app's own idle limit sits under "i_" + 8 hex: found by its shape, never listed, "default" allowed
+void test_app_idle_override_keys() {
+  char key[16];
+  TEST_ASSERT_TRUE(app_idle_app_key("writer", key, sizeof(key)));
+  TEST_ASSERT_NOT_NULL(xds_find(key));
+  TEST_ASSERT_EQUAL_STRING("default", xds_find(key)->def);
+  for (const char *v : {"default", "off", "5", "10", "15", "30", "60"}) TEST_ASSERT_EQUAL_MESSAGE(0, check(key, v), v);
+  TEST_ASSERT_EQUAL(APP_EINVAL, check(key, "7"));
+  TEST_ASSERT_EQUAL(APP_EINVAL, check(key, ""));
+  TEST_ASSERT_NULL(xds_find("i_"));
+  TEST_ASSERT_NULL(xds_find("i_1234567")); // 7 hex
+  TEST_ASSERT_NULL(xds_find("i_123456789")); // 9 hex
+  TEST_ASSERT_NULL(xds_find("i_1234567G"));
+  TEST_ASSERT_NULL(xds_find("I_12345678"));
+  int n = 0;
+  xds_keys(&n);
+  TEST_ASSERT_EQUAL(5, n); // not listed
 }
 
 void test_usb_seen_list() {
@@ -73,6 +97,7 @@ int main() {
   UNITY_BEGIN();
   RUN_TEST(test_printer_values);
   RUN_TEST(test_choices_numbers_and_unknown_keys);
+  RUN_TEST(test_app_idle_override_keys);
   RUN_TEST(test_usb_seen_list);
   return UNITY_END();
 }

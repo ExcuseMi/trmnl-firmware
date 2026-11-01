@@ -354,7 +354,7 @@ QR as the apps profile, on 2.4 GHz or through the modem. Routes: `lib/trmnl/src/
 | Stored declarations | `settings_declare` also writes `/xset/decl/<app>.txt` (`app_decl_store.h`) when its text differs; the page reads it back through `asf_declare`; another format version or a damaged file: "start the app once" |
 | Other apps' values | the same checks as the settings profile (`ws_settings_apply`), written to that app's NVS namespace; a secret is never sent back |
 | Changed while not running | counted in NVS `xchg`; the app gets `APP_EVENT_SETTINGS` (key = count) right after its next start |
-| Device settings | NVS `xdev`, keys and checks in `x_devset.h`: `printer` (printer.cfg text), `pen_area` fill/keep, `mouse_speed` slow/normal/fast, `cleanup_s` 0..600. Apps: `device_setting_get` / `device_setting_set` (API 2.11) |
+| Device settings | NVS `xdev`, keys and checks in `x_devset.h`: `printer` (printer.cfg text), `pen_area` fill/keep, `mouse_speed` slow/normal/fast, `cleanup_s` 0..600, `app_idle_min` off/5/10/15/30/60 (default 10). Apps: `device_setting_get` / `device_setting_set` (API 2.11) |
 | Printer owner | the firmware. The Print app's old `/appdata/trmnl-print/printer.cfg` is moved in once when nothing is stored |
 | Test page | the page closes and the X starts `trmnl-print` with the argument `test` |
 | USB seen | RTC memory list (`usb_seen.h`), 8 newest; kinds from the enumeration (hub), the keyboard, mouse and pen code |
@@ -362,6 +362,22 @@ QR as the apps profile, on 2.4 GHz or through the modem. Routes: `lib/trmnl/src/
 | Wi-Fi (`ws_page_radio.cpp`, `wifi_switch.h`, device `src/webshare_radio.cpp`, `src/wifi_switch_x.cpp`) | Change network: the S3 scans 2.4 GHz (and the modem both bands while its UART is free); through the modem the scan is `AT+CWLAP` in the server's framing. Join is checked against that scan (band and security from it, enterprise refused: setup portal, password 8..63 or 64 hex). Before the confirm the page says what happens. The page closes, the X tries the network, saves it only when joined (else the saved one again), then opens the page again on the network in use with "Now on ..." or "Could not join ...". The password: never sent back, never logged (test), wiped after the try. Test `test_wifi_switch`, `test_ws_msrv` |
 | Bluetooth pairing | Pair a keyboard: the X lists keyboards (here and on its pairing screen), Pair picks one (`ble_pair_pick`), the passkey shows on both, the page asks every 1.5 s. A new pairing replaces the bond only when it succeeds. Radio: the 5 GHz page leaves the S3's radio to Bluetooth; on 2.4 GHz and the access point it is shared (coexistence, as for apps); refused (409) while ESP-NOW runs or an app's keyboard holds it. Ends with the page |
 | Printers on 5 GHz | ESP-AT runs one `AT+CIPSTART` at a time, so connects cannot be in flight together. The probe uses a link the page's server does not hold (`nb_free_link`, 409 when the phone holds all 5) next to the server (`Modem::serverProbeOpen`, its CONNECT/CLOSED and data kept from the page), each connect with its own timeout (`nb_cipstart`: `AT+CIPSTART=<link>,"TCP",<ip>,631,,,<ms>`; the firmware's default was 5 s per empty address), `nb_probe_ms(15000)` = 47 ms: the /24 in about 12 s plus the AT round trips. Not run on a device: the timeout field's syntax in AT v5.1 is unproven | `device_page_open(section)`: when the app returns, the X opens the page as from Settings, its QR ends in `#configure=<app>`, `#apps`, `#devices` or `#this-x` and the page goes there after the login (once; typing the code opens the start). Recorded like `app_launch` (`app_launch_page`, test `test_app_launch`), lost the same way |
+
+## Idle limit (API 2.13)
+
+An app left alone goes back to TRMNL. Device setting `app_idle_min` (This X > Apps on the phone page: Never, 5, 10, 15, 30,
+60 minutes; default 10); each app can override it (Apps > Configure > "Close this app after": device setting, Never, 5..60),
+kept by the firmware under the key `i_<8 hex of the name>` (`/api/appidle`), not in the app's settings.
+
+| Rule | Detail |
+|---|---|
+| Idle | no touch (also one the app does not get), key (serial, USB, Bluetooth), pen or mouse report (hover and tablet buttons too). ESP-NOW packets and the app's own work are not input |
+| 30 s before | a toast along the bottom edge, "Closing in 30 s, touch to stay"; 1 bit screen only (the rows under it are kept in PSRAM and put back by the next input; no memory or another mode: no toast, the end still comes) |
+| At the limit | `APP_EVENT_EXIT` exactly as for a long press, the usual `APP_EXIT_GRACE_MS`, then the normal end: TRMNL's screen and sleep schedule. Not resumed after the next wake. Event log: "Apps: <name> closed after N min idle" |
+| `app_idle_hold(on)` | for an app that works without input (FPV cockpit while telemetry packets arrive, a timer): call `app_idle_hold(1)` while it does, `app_idle_hold(0)` when it stops; while held nothing runs, letting go starts a full stretch. Check `api->size >= APP_API_SLOT(60)` first |
+
+Code: `lib/trmnl/src/app_idle.cpp` (pure), `src/app_idle_x.cpp` (clock, notes, toast), tests `test/test_app_idle`,
+`test_x_devset`, `test_ws_msrv`. Not run on a device: what the toast looks like on the glass, and the sleep that follows.
 
 ## Install via Wi-Fi (proof of concept)
 
@@ -489,6 +505,7 @@ status: the switch can take the window of a touch event, and that touch then nev
 | pen and mouse together: pen owns the cursor, hand-over position, button release, held button masked, stale out-of-range frames, either unplugged | `test/test_usb_cursor` | `pio test -e native -f test_usb_cursor` |
 | mouse as a pen: boot and descriptor layouts (report ID, 16 bit axes, no mouse, cut off, garbage), reports, centre start, speed and acceleration, aspect, clamping, buttons, leaving | `test/test_usb_mouse` | `pio test -e native -f test_usb_mouse` |
 | USB port rules (roles: one at a time, only the owner switches back; power, 1 s wait, probe, removal, charger in host mode, drive showing, app exit, restart), HID reports to key events | `test/test_usb_port`, `test/test_hid_keys` | `pio test -e native -f test_usb_port -f test_hid_keys` |
+| idle limit: texts, override over device setting, timer, warning, hold, clock wrap, no resume | `test/test_app_idle` | `pio test -e native -f test_app_idle` |
 | battery and local time: unreadable gauge, charging flag, clock never set, no or unusable zone (UTC fallback), DST, west of UTC across midnight | `test/test_app_clock` | `pio test -e native -f test_app_clock` |
 | configuration: header up to date, every key required, no configured value left in the sources | `test/config` | `.venv/bin/pytest test/config` |
 | Bluetooth keyboard: pairing and reconnect rules; security before discovery, report and boot protocol, encryption failures (key missing, wrong passkey, passkey timeout), step timeouts, bond deleted on the keyboard side; report maps (report IDs, bitmap, rollover, cut-off and random maps) | `test/test_ble_pair`, `test_ble_hogp`, `test_ble_hogp_cache`, `test_ble_conn_params`, `test_hid_report_map` (the sim has no Bluetooth) | `pio test -e native -f test_ble_pair -f test_ble_hogp -f test_ble_hogp_cache -f test_ble_conn_params -f test_hid_report_map` |

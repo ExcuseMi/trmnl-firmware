@@ -4,7 +4,7 @@
 #include <stddef.h>
 
 // The X's own device settings, one owner for what several apps share (docs/apps.md "Device settings"): the default
-// printer, the pen tablet's area, the mouse speed, the screen clean-up. The phone page writes them (the X's page,
+// printer, the pen tablet's area, the mouse speed, the screen clean-up, the idle limit of apps. The phone page writes them (the X's page,
 // Devices), apps read them with device_setting_get (API 2.11). Pure: the keys, their defaults and the value checks;
 // the firmware keeps the values in NVS (namespace "xdev").
 
@@ -21,7 +21,7 @@ typedef struct {
 
 // The keys, in the page's order; n set to their count
 const xds_key_t *xds_keys(int *n);
-// The key's entry, or nullptr for an unknown key
+// The key's entry, or nullptr for an unknown key. An app's idle override (app_idle_app_key) is found too, not listed
 const xds_key_t *xds_find(const char *key);
 // 0, APP_ENOENT (unknown key) or APP_EINVAL with `why` (the value is never copied into it). printer: key=value lines
 // as the Print app's printer.cfg (name, host, port, path, format), host required (letters, digits, '.', '-', ':'),
