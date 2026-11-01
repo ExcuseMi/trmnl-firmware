@@ -66,6 +66,12 @@ uint32_t ble_pair_touch(ble_pair_t *p, int zone) {
   return BLE_ACT_CONNECT | BLE_ACT_SCREEN; // scanning stops: not set
 }
 
+uint32_t ble_pair_pick(ble_pair_t *p, int i) {
+  if (p->state != BLE_PAIR_LIST || i < 0 || i >= p->found_count) return 0;
+  p->selected = i;
+  return ble_pair_touch(p, 1);
+}
+
 uint32_t ble_pair_passkey(ble_pair_t *p, uint32_t passkey) {
   if (p->state != BLE_PAIR_CONNECTING) return 0;
   p->state = BLE_PAIR_PASSKEY;

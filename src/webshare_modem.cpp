@@ -7,6 +7,7 @@
 #include <globals.h>
 #include <modem.h>
 #include <trmnl_log.h>
+#include <net_browse.h>
 #include <ws_msrv.h>
 
 #include "evlog.h"
@@ -64,6 +65,13 @@ static void server_task(void *) {
 }
 
 bool webshare_modem_alive(void) { return alive; }
+
+int webshare_modem_free_link(void) {
+  uint32_t used = 0;
+  for (int i = 0; i < WS_MSRV_LINKS; i++)
+    if (srv.links[i]) used |= 1u << i;
+  return nb_free_link(used, WS_MSRV_LINKS);
+}
 
 bool webshare_modem_owns_uart(void) { return alive; }
 

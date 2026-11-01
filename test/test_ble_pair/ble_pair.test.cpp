@@ -70,6 +70,22 @@ void test_touch_moves_and_picks() {
   TEST_ASSERT_EQUAL_STRING("b", p.target.name);
 }
 
+// The phone page picks by index (Devices > Bluetooth > Pair a keyboard)
+void test_the_page_picks_by_index() {
+  ble_pair_enable(&p, nullptr);
+  ble_pair_peer_t a = peer(1, "K380"), b = peer(2, "POP Keys");
+  ble_pair_found(&p, &a);
+  ble_pair_found(&p, &b);
+  TEST_ASSERT_EQUAL(0u, ble_pair_pick(&p, 2)); // no such keyboard
+  TEST_ASSERT_EQUAL(0u, ble_pair_pick(&p, -1));
+  TEST_ASSERT_EQUAL(BLE_PAIR_LIST, p.state);
+  uint32_t act = ble_pair_pick(&p, 1);
+  TEST_ASSERT_BITS(BLE_ACT_CONNECT, BLE_ACT_CONNECT, act);
+  TEST_ASSERT_EQUAL(BLE_PAIR_CONNECTING, p.state);
+  TEST_ASSERT_EQUAL_STRING("POP Keys", p.target.name);
+  TEST_ASSERT_EQUAL(0u, ble_pair_pick(&p, 0)); // not while connecting
+}
+
 void test_passkey_then_connected_saves_the_bond() {
   ble_pair_enable(&p, nullptr);
   ble_pair_peer_t k = peer(1, "POP Icon Keys");
@@ -162,6 +178,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_no_keyboard_found_a_tap_does_nothing);
   RUN_TEST(test_found_keyboards_are_listed_once_and_bounded);
   RUN_TEST(test_touch_moves_and_picks);
+  RUN_TEST(test_the_page_picks_by_index);
   RUN_TEST(test_passkey_then_connected_saves_the_bond);
   RUN_TEST(test_wrong_passkey_or_refused_pairing_back_to_the_list);
   RUN_TEST(test_a_bond_connects_without_the_list);

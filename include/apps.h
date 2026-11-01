@@ -27,7 +27,7 @@ void apps_run_arg(const char *path, const char *arg);
 
 // The menu's "Install via Wi-Fi": starts the Wi-Fi page in its apps profile, shows where it is, the code and a QR of
 // the one-time login link, until a long press (or 15 min idle). Then back to TRMNL; does not return.
-void apps_install_session(void);
+void apps_install_session(const char *section);
 
 // At a wake: runs the app that was running before a restart (apps_run, does not return), unless
 // it did not get past its start, or the restart was a crash. Returns if there is none.

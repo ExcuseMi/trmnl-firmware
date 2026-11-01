@@ -182,6 +182,32 @@ void test_service_names_are_split_or_refused() {
   TEST_ASSERT_FALSE(nb_service_split("_ipp._tcp", a, b, 8));
 }
 
+// The modem probe (one connect at a time in ESP-AT): its own short timeout, so the /24 fits the budget
+void test_the_probe_fits_the_budget() {
+  TEST_ASSERT_EQUAL(47, nb_probe_ms(15000)); // 253 addresses * 47 ms = 11.9 s of the 15 s
+  TEST_ASSERT_TRUE(253 * nb_probe_ms(15000) <= 15000 * 4 / 5);
+  TEST_ASSERT_EQUAL(NB_PROBE_MIN_MS, nb_probe_ms(1000));
+  TEST_ASSERT_EQUAL(NB_PROBE_MAX_MS, nb_probe_ms(600000));
+}
+
+void test_cipstart_carries_the_timeout_and_the_link() {
+  char b[96];
+  TEST_ASSERT_TRUE(nb_cipstart(b, sizeof(b), 4, "192.168.1.7", 631, 47) > 0);
+  TEST_ASSERT_EQUAL_STRING("AT+CIPSTART=4,\"TCP\",\"192.168.1.7\",631,,,47", b);
+  TEST_ASSERT_TRUE(nb_cipstart(b, sizeof(b), -1, "10.0.0.2", 631, 300) > 0);
+  TEST_ASSERT_EQUAL_STRING("AT+CIPSTART=\"TCP\",\"10.0.0.2\",631,,,300", b);
+  TEST_ASSERT_EQUAL(0, nb_cipstart(b, sizeof(b), 1, "printer\",\"x", 631, 47)); // only an address goes in
+  TEST_ASSERT_EQUAL(0, nb_cipstart(b, sizeof(b), 1, "1.2.3.4", 0, 47));
+  TEST_ASSERT_EQUAL(0, nb_cipstart(b, 20, 1, "192.168.100.100", 631, 47)); // does not fit
+}
+
+void test_a_free_link_next_to_the_page() {
+  TEST_ASSERT_EQUAL(4, nb_free_link(0, 5));
+  TEST_ASSERT_EQUAL(3, nb_free_link(1u << 4, 5));
+  TEST_ASSERT_EQUAL(0, nb_free_link(0x1e, 5));
+  TEST_ASSERT_EQUAL(-1, nb_free_link(0x1f, 5)); // the phone holds all five
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_a_printer_is_added_once_and_cleaned);
@@ -194,5 +220,8 @@ int main(int, char **) {
   RUN_TEST(test_the_ipp_query_and_head);
   RUN_TEST(test_the_model_is_read_from_a_reply_and_bad_replies_are_refused);
   RUN_TEST(test_service_names_are_split_or_refused);
+  RUN_TEST(test_the_probe_fits_the_budget);
+  RUN_TEST(test_cipstart_carries_the_timeout_and_the_link);
+  RUN_TEST(test_a_free_link_next_to_the_page);
   return UNITY_END();
 }

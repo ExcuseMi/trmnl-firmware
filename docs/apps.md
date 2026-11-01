@@ -272,7 +272,7 @@ Pure parts in `lib/trmnl/src/net_browse.cpp` (test `test_net_browse`), glue in `
 | call | `net_browse(service, timeout_ms, cb, ctx)`: `cb(name, host, port, path, ctx)` per result (name = instance name, host = IPv4 text, path = TXT `rp` without a leading slash, `""` when none). 0 timeout = 5 s, at most 60 s; at most 8 results, no duplicates (same host and port); a name has no control characters; a bad `rp` becomes `""` |
 | returns | the count (0: none), `APP_EINVAL` (bad service, no cb), `APP_ENOTSUP` (modem path, not `_ipp._tcp`), `APP_ENONET`, `APP_EBUSY` (ESP-NOW), `APP_ENOMEM`, `APP_EIO` |
 | 2.4 GHz network | the S3 asks mDNS (`mdns_query_ptr`); starts its own mDNS only when none runs; an entry without an IPv4 address is looked up once (1.5 s), else dropped |
-| saved 5 GHz network | the ESP-AT firmware (v5.1) has no mDNS query. Fallback: the modem's address (`AT+CIPSTA?`), then every address of its /24 nearest first (self+1, self-1, self+2, ...) gets a TCP connect to 631 with a 300 ms wait; a hit gets an IPP Get-Printer-Attributes (`printer-make-and-model`) at `ipp/print`; stops after 4 printers or `timeout_ms`. A hit that answers HTTP but not IPP is listed under its address. Not measured on a device yet: the walk covers about `timeout_ms / 0.4 s` addresses |
+| saved 5 GHz network | the ESP-AT firmware (v5.1) has no mDNS query. Fallback: the modem's address (`AT+CIPSTA?`), then every address of its /24 nearest first (self+1, self-1, self+2, ...) gets a TCP connect to 631 with its own timeout (`nb_probe_ms(timeout_ms)`, 30..300 ms, one connect at a time); a hit gets an IPP Get-Printer-Attributes (`printer-make-and-model`) at `ipp/print`; stops after 4 printers or `timeout_ms`. A hit that answers HTTP but not IPP is listed under its address. Not measured on a device yet |
 | memory | one 1400-byte reply buffer and one list of 8, both static |
 
 ## ESP-NOW (API 2.4)
@@ -346,8 +346,8 @@ QR as the apps profile, on 2.4 GHz or through the modem. Routes: `lib/trmnl/src/
 | Section | What it does |
 |---|---|
 | Apps | list with name and icon from the ELF, install/update/remove, Configure: the app's settings form while it does not run |
-| Devices | default printer (find with net_browse `_ipp._tcp`, 2.4 GHz only; Use; Test page after a confirm), Bluetooth keyboard (name, Forget), USB devices seen since the X started, pen area, mouse speed, clean-up flash |
-| This X | device name, saved Wi-Fi, firmware version, keyboard layout |
+| Devices | default printer (find with net_browse `_ipp._tcp`, also on 5 GHz; Use; Test page after a confirm), Bluetooth keyboard (name, Forget, Pair a keyboard), USB devices seen since the X started; Drawing: pen area, mouse speed, clean-up flash |
+| This X | device name, firmware version, keyboard layout, Wi-Fi (saved network, Change network) |
 
 | Rule | How |
 |---|---|
@@ -358,6 +358,10 @@ QR as the apps profile, on 2.4 GHz or through the modem. Routes: `lib/trmnl/src/
 | Printer owner | the firmware. The Print app's old `/appdata/trmnl-print/printer.cfg` is moved in once when nothing is stored |
 | Test page | the page closes and the X starts `trmnl-print` with the argument `test` |
 | USB seen | RTC memory list (`usb_seen.h`), 8 newest; kinds from the enumeration (hub), the keyboard, mouse and pen code |
+| Mouse speed | `usb_mouse_set_speed`: slow half, normal, fast 1.75 times the gain; read at each mouse plug-in and when the setting is saved (test `test_usb_mouse`) |
+| Wi-Fi (`ws_page_radio.cpp`, `wifi_switch.h`, device `src/webshare_radio.cpp`, `src/wifi_switch_x.cpp`) | Change network: the S3 scans 2.4 GHz (and the modem both bands while its UART is free); through the modem the scan is `AT+CWLAP` in the server's framing. Join is checked against that scan (band and security from it, enterprise refused: setup portal, password 8..63 or 64 hex). Before the confirm the page says what happens. The page closes, the X tries the network, saves it only when joined (else the saved one again), then opens the page again on the network in use with "Now on ..." or "Could not join ...". The password: never sent back, never logged (test), wiped after the try. Test `test_wifi_switch`, `test_ws_msrv` |
+| Bluetooth pairing | Pair a keyboard: the X lists keyboards (here and on its pairing screen), Pair picks one (`ble_pair_pick`), the passkey shows on both, the page asks every 1.5 s. A new pairing replaces the bond only when it succeeds. Radio: the 5 GHz page leaves the S3's radio to Bluetooth; on 2.4 GHz and the access point it is shared (coexistence, as for apps); refused (409) while ESP-NOW runs or an app's keyboard holds it. Ends with the page |
+| Printers on 5 GHz | ESP-AT runs one `AT+CIPSTART` at a time, so connects cannot be in flight together. The probe uses a link the page's server does not hold (`nb_free_link`, 409 when the phone holds all 5) next to the server (`Modem::serverProbeOpen`, its CONNECT/CLOSED and data kept from the page), each connect with its own timeout (`nb_cipstart`: `AT+CIPSTART=<link>,"TCP",<ip>,631,,,<ms>`; the firmware's default was 5 s per empty address), `nb_probe_ms(15000)` = 47 ms: the /24 in about 12 s plus the AT round trips. Not run on a device: the timeout field's syntax in AT v5.1 is unproven | `device_page_open(section)`: when the app returns, the X opens the page as from Settings, its QR ends in `#configure=<app>`, `#apps`, `#devices` or `#this-x` and the page goes there after the login (once; typing the code opens the start). Recorded like `app_launch` (`app_launch_page`, test `test_app_launch`), lost the same way |
 
 ## Install via Wi-Fi (proof of concept)
 

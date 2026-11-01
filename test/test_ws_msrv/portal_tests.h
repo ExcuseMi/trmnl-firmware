@@ -18,6 +18,13 @@ struct PortalFake {
   std::string ble = "K380";
   bool forgot = false;
   bool dev_set_fails = false;
+  // Wi-Fi and Bluetooth (radio_tests.h)
+  wsw_list_t nets = {};
+  int scan_rc = 0, join_rc = 0, joins = 0;
+  wsw_join_t joined = {};
+  int ble_rc = 0, ble_last_do = -1, ble_last_i = -2;
+  ws_ble_info_t ble_info = {};
+  std::string log;
 };
 static PortalFake PF;
 
@@ -76,8 +83,22 @@ static void p_x(ws_x_info_t *x) {
   snprintf(x->wifi, sizeof(x->wifi), "Home");
 }
 
-static const ws_portal_env_t PORTAL = {p_meta,    p_decl,    p_get,  p_set,  p_remove, p_changed, p_dev_get,
-                                       p_dev_set, p_find,    p_test, p_ble,  p_forget, p_usb,     p_x};
+static int p_scan(wsw_list_t *out) { return PF.scan_rc ? PF.scan_rc : ((*out = PF.nets), PF.nets.n); }
+static int p_join(const wsw_join_t *j) { return PF.join_rc ? PF.join_rc : ((PF.joined = *j), PF.joins++, 0); }
+static int p_ble_pair(ws_ble_do_t w, int i) { return PF.ble_rc ? PF.ble_rc : ((PF.ble_last_do = w), (PF.ble_last_i = i), 0); }
+static void p_ble_info(ws_ble_info_t *b) { *b = PF.ble_info; }
+static void p_log(const char *fmt, ...) {
+  char b[256];
+  va_list a;
+  va_start(a, fmt);
+  vsnprintf(b, sizeof(b), fmt, a);
+  va_end(a);
+  PF.log += std::string(b) + "\n";
+}
+
+static const ws_portal_env_t PORTAL = {p_meta,    p_decl, p_get,  p_set,     p_remove, p_changed, p_dev_get,
+                                       p_dev_set, p_find, p_test, p_ble,     p_forget, p_usb,     p_x,
+                                       p_scan,    p_join, p_ble_pair, p_ble_info};
 static ws_env_t ENV_P;
 
 static std::string start_portal() {
@@ -85,6 +106,7 @@ static std::string start_portal() {
   PF = PortalFake();
   ENV_P = ENV;
   ENV_P.portal = &PORTAL;
+  ENV_P.log = p_log;
   ws_page_start(WS_PROFILE_INSTALL, false, &ENV_P, &APP_FS->fs, &ROOT_FS->fs);
   WP.running = true;
   return login();
@@ -172,14 +194,19 @@ static void test_portal_printers_and_bluetooth() {
   TEST_ASSERT_TRUE_MESSAGE(body(r).find("\"host\":\"192.168.1.50\"") != std::string::npos, body(r).c_str());
   PF.find_rc = APP_ENONET;
   TEST_ASSERT_EQUAL(503, status(post("/api/printers", "", c)));
+  PF.find_rc = APP_EBUSY; // the modem path: the phone holds every link
+  TEST_ASSERT_EQUAL(409, status(post("/api/printers", "", c)));
   TEST_ASSERT_EQUAL(200, status(post("/api/bleforget", "", c)));
   TEST_ASSERT_TRUE(PF.forgot);
   TEST_ASSERT_TRUE(body(get("/api/devices", c)).find("\"ble\":null") != std::string::npos);
 }
+
+#include "radio_tests.h"
 
 void run_portal_tests() {
   RUN_TEST(test_portal_needs_login_and_the_portal_env);
   RUN_TEST(test_portal_other_apps_settings_checked);
   RUN_TEST(test_portal_device_settings_and_printer);
   RUN_TEST(test_portal_printers_and_bluetooth);
+  run_radio_tests();
 }

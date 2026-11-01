@@ -8,6 +8,12 @@
 
 // The app asks for (true) or stops (false) the Bluetooth keyboard. Returns 0 or APP_ENOMEM
 int ble_keyboard_enable(bool on);
+// The same for the phone page (Devices > Bluetooth): new_keyboard lists keyboards even when one is bonded; a new
+// pairing replaces the bond only once it succeeds. 0 or APP_ENOMEM; 0 at once when the radio is already on
+int ble_keyboard_start(bool new_keyboard);
+// The page picked found[i]; the pairing state as the page sees it (state OFF when the radio is off)
+void ble_keyboard_pick(int i);
+void ble_keyboard_pair_state(ble_pair_t *out);
 bool ble_keyboard_connected(void);
 // The app ended: link down, radio off, the app's screen back. Returns once done
 void ble_keyboard_end(void);

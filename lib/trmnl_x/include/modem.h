@@ -38,6 +38,8 @@ private:
   void *_srvCtx = nullptr;
   const char *_capPrefix = nullptr;
   char _cap[MODEM_AT_LINE_MAX];
+  String *_lines = nullptr; // serverScan: every "+CWLAP:" line
+  int _probeLink = -1; // serverProbeOpen: a client link next to the server, its events and data not the page's
   void serverLine(const char *line);
 
 public:
@@ -116,4 +118,12 @@ public:
   bool serverSend(int link, const uint8_t *data, size_t len, uint32_t timeoutMs); // one AT+CIPSEND=<link>,<len>
   void serverClose(int link);
   void serverStop(); // every link closed, server off, AT+CIPMUX=0 again for tcpOpen
+  // AT+CWLAP while the server runs (both bands): the answer goes through the framing, the links keep their data
+  bool serverScan(std::vector<ModemNetwork> &out);
+  // A client connect on a free `link` while the server runs (printer search): AT+CIPSTART=<link>,... with its own
+  // timeout (net_browse.h nb_cipstart); its data goes to `sink`, its CONNECT/CLOSED never to the page. Send with
+  // serverSend, read with tcpPump, end with serverProbeClose
+  bool serverProbeOpen(int link, const char *host, uint16_t port, uint32_t timeoutMs, TcpSink sink, void *ctx);
+  void serverProbeClose();
+  uint32_t serverIp(); // AT+CIPSTA? through the framing (getIp reads the UART raw), 0 when none
 };

@@ -83,6 +83,26 @@ bool nb_walk_next(uint32_t self, int *step, uint32_t *out) {
   return false;
 }
 
+uint32_t nb_probe_ms(uint32_t budget_ms) {
+  uint32_t ms = budget_ms / 253 * 4 / 5; // a fifth of the time for the AT round trips and the IPP exchange of hits
+  return ms < NB_PROBE_MIN_MS ? NB_PROBE_MIN_MS : ms > NB_PROBE_MAX_MS ? NB_PROBE_MAX_MS : ms;
+}
+
+size_t nb_cipstart(char *out, size_t n, int link, const char *host, uint16_t port, uint32_t timeout_ms) {
+  uint32_t ip;
+  if (!out || !n || !host || !nb_ip_parse(host, &ip) || port == 0 || link > 31) return 0;
+  int w = link < 0 ? snprintf(out, n, "AT+CIPSTART=\"TCP\",\"%s\",%u,,,%lu", host, (unsigned)port, (unsigned long)timeout_ms)
+                   : snprintf(out, n, "AT+CIPSTART=%d,\"TCP\",\"%s\",%u,,,%lu", link, host, (unsigned)port,
+                              (unsigned long)timeout_ms);
+  return w > 0 && (size_t)w < n ? (size_t)w : 0;
+}
+
+int nb_free_link(uint32_t used, int links) {
+  for (int i = links - 1; i >= 0; i--)
+    if (!(used & (1u << i))) return i;
+  return -1;
+}
+
 void nb_ip_str(uint32_t ip, char *out, size_t n) {
   snprintf(out, n, "%u.%u.%u.%u", (unsigned)(ip >> 24), (unsigned)((ip >> 16) & 255), (unsigned)((ip >> 8) & 255),
            (unsigned)(ip & 255));

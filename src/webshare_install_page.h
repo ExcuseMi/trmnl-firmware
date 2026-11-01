@@ -23,6 +23,9 @@ button{font-weight:600;cursor:pointer}input,select{max-width:100%}
 .row:first-child{border-top:0}.n{flex:1;min-width:8rem;word-break:break-word}.s{color:var(--mute);font-size:.85rem}
 canvas{width:40px;height:40px;border:1px solid var(--line);border-radius:.35rem;image-rendering:pixelated;background:#fff}
 .f{display:flex;flex-direction:column;gap:.2rem;margin:.5rem 0}.f label{font-weight:600;font-size:.9rem}
+.key{font:700 2.4rem/1.2 ui-monospace,monospace;letter-spacing:.3em;text-align:center;padding:.4rem 0}
+#nets{margin-top:.6rem}
+.warn{border-left:4px solid var(--fg);padding:.3rem .7rem;margin:.6rem 0;font-size:.92rem}
 #msg{white-space:pre-line;margin:.6rem 0;padding:.6rem .8rem;background:var(--ok);border-radius:.45rem}#msg.bad{background:var(--bad)}
 </style></head><body>
 <header><b>X</b><span id=title>The X</span></header>
@@ -41,11 +44,13 @@ started once. From a computer: <code>curl -F file=@app.elf "http://&lt;this addr
 </div>
 <div id=t-devs hidden>
 <section><h2>Printer</h2><div id=prn></div><button id=find>Find printers</button><div id=found></div></section>
-<section><h2>Bluetooth</h2><div id=ble></div></section>
-<section><h2>USB</h2><div id=usb></div><div id=devset></div></section>
+<section><h2>Bluetooth</h2><div id=ble></div><div id=pair></div></section>
+<section><h2>USB</h2><div id=usb></div></section>
+<section><h2>Drawing</h2><p class=s>Pen tablet and mouse, and the clean-up flash of the screen.</p><div id=devset></div></section>
 </div>
 <div id=t-me hidden>
 <section><h2>This X</h2><div id=me></div><p id=kbd></p></section>
+<section><h2>Wi-Fi</h2><div id=wifi></div><button id=scan>Change network</button><div id=nets></div></section>
 <section><h2>Touch bar</h2><div id=bar><button data-b=left>Left</button> <button data-b=middle>Middle</button>
 <button data-b=right>Right</button> <button data-b=long>Long press</button> <button data-b=stop>Stop page</button></div></section>
 </div>
@@ -85,7 +90,10 @@ async function load(){
       say(res.ok?'Removed.':(res.j.error||'Failed'),!res.ok);load()};d.appendChild(x);box.appendChild(d);
     api('/api/appinfo?app='+encodeURIComponent(id)).then(i=>{if(!i.ok)return;n.textContent=i.j.name;
       if(i.j.icon)icon(c,i.j.icon);else letter(c,(i.j.name[0]||'?').toUpperCase())})}
-  if(!r.j.apps.length)box.textContent='No apps yet.'}
+  if(!r.j.apps.length)box.textContent='No apps yet.';go()}
+// The section an app asked for (device_page_open: #configure=<app>, #devices, #this-x, #apps), once
+function go(){const h=decodeURIComponent(location.hash.slice(1));if(!h)return;history.replaceState(null,'',location.pathname);
+  if(h.startsWith('configure='))configure(h.slice(10),h.slice(10));else if(h=='devices')tab('devs');else if(h=='this-x')tab('me')}
 let cfgApp='';
 async function configure(id,name){
   const r=await api('/api/appsettings?app='+encodeURIComponent(id));
@@ -121,10 +129,44 @@ async function devices(){
   d.appendChild(el('span',r.j.ble?'Paired keyboard: '+r.j.ble:'No Bluetooth keyboard paired.','n'));
   if(r.j.ble){const f=el('button','Forget');f.onclick=async()=>{if(!confirm('Forget '+r.j.ble+'?'))return;
     const x=await post('/api/bleforget');say(x.ok?'Forgotten.':(x.j.error||'Failed'),!x.ok);devices()};d.appendChild(f)}
-  b.appendChild(d);b.appendChild(el('p','A new keyboard: switch it to pairing; the next app that uses a keyboard shows the pairing code on the X.','s'));
+  b.appendChild(d);if(!pairing){const pk=el('button','Pair a keyboard');pk.onclick=()=>blepair('start');b.appendChild(pk);
+    b.appendChild(el('p','Switch the keyboard to pairing first. The X lists what it finds here and on its screen.','s'))}
   const u=$('usb');u.textContent='';
   r.j.usb.forEach(x=>{const d=el('div',null,'row');d.appendChild(el('span',x.kind,'n'));d.appendChild(el('span',x.id,'s'));u.appendChild(d)});
   if(!r.j.usb.length)u.appendChild(el('p','No USB device seen since the X started.','s'))}
+// Bluetooth pairing: the X scans, the page lists, the X shows the passkey; checked every 1.5 s while it runs
+let pairing=false,ptimer=0;
+async function blepair(what,i){const r=await post('/api/blepair',enc(i==null?{do:what}:{do:what,i}));
+  if(!r.ok){say(r.j.error||'Failed',true);return}if(what=='start'){pairing=true;devices();blepoll()}
+  if(what=='stop'){pairing=false;$('pair').textContent='';devices()}}
+async function blepoll(){clearTimeout(ptimer);if(!pairing)return;const r=await api('/api/blepair');const p=$('pair');p.textContent='';
+  if(!r.ok){say(r.j.error||'Failed',true);return}const s=r.j;
+  if(s.state=='paired'){say('Paired with '+s.paired+'. Apps that use a keyboard find it now.');blepair('stop');return}
+  if(s.state=='off'){pairing=false;devices();return}
+  if(s.message)p.appendChild(el('p',s.message,'s'));
+  if(s.state=='list'){p.appendChild(el('p',s.found.length?'Keyboards found:':'Looking for keyboards...','s'));
+    s.found.forEach((k,i)=>{const d=el('div',null,'row');d.appendChild(el('span',k.name||'(no name)','n'));d.appendChild(el('span',k.rssi+' dBm','s'));
+      const b=el('button','Pair');b.onclick=()=>blepair('pick',i);d.appendChild(b);p.appendChild(d)})}
+  if(s.state=='connecting')p.appendChild(el('p','Connecting...','s'));
+  if(s.state=='passkey'){p.appendChild(el('p','Type this on the keyboard, then press Enter:'));p.appendChild(el('div',s.passkey,'key'))}
+  const x=el('button','Stop');x.onclick=()=>blepair('stop');p.appendChild(x);ptimer=setTimeout(blepoll,1500)}
+// Wi-Fi: scan, pick, password (never shown back), Join after a confirm; the X tries it once this page has closed
+let wifiNow='';
+$('scan').onclick=async()=>{const n=$('nets');n.textContent='Scanning (a few seconds)...';const r=await post('/api/wifiscan');n.textContent='';
+  if(!r.ok){say(r.j.error||'Failed',true);return}
+  if(!r.j.nets.length)n.appendChild(el('p','No network found.','s'));
+  r.j.nets.forEach(w=>{const d=el('div',null,'row');d.appendChild(el('span',w.ssid,'n'));
+    d.appendChild(el('span',w.band+' GHz, '+w.rssi+' dBm'+(w.open?', open':''),'s'));
+    if(w.ent){d.appendChild(el('span','enterprise: use the setup portal','s'));n.appendChild(d);return}
+    const b=el('button','Choose');b.onclick=()=>pickwifi(w);d.appendChild(b);n.appendChild(d)})};
+function pickwifi(w){const n=$('nets');n.textContent='';n.appendChild(el('h2',w.ssid));let pw=null;
+  if(!w.open){const f=el('div',null,'f');f.appendChild(el('label','Password'));pw=el('input');pw.type='password';pw.autocomplete='off';
+    pw.maxLength=64;f.appendChild(pw);n.appendChild(f)}
+  n.appendChild(el('p','What happens: the X closes this page and joins "'+w.ssid+'". If that works it keeps it and opens the page again on that network: put your phone on "'+w.ssid+'" too and scan the new code. If it does not work, the X stays on '+(wifiNow?'"'+wifiNow+'"':'its saved network')+'. Either way the result is on the X\'s screen.','warn'));
+  const j=el('button','Join');j.onclick=async()=>{if(!confirm('Close this page and switch the X to "'+w.ssid+'"?'))return;
+    const r=await post('/api/wifijoin',enc({s:w.ssid,p:pw?pw.value:''}));if(pw)pw.value='';
+    say(r.ok?'The X is switching to "'+w.ssid+'". This page stops now; look at the X.':(r.j.error||'Failed'),!r.ok)};
+  const c=el('button','Cancel');c.onclick=()=>{n.textContent=''};n.appendChild(j);n.appendChild(document.createTextNode(' '));n.appendChild(c)}
 $('find').onclick=async()=>{$('found').textContent='Searching...';const r=await post('/api/printers');const f=$('found');f.textContent='';
   if(!r.ok){say(r.j.error||'Failed',true);return}
   if(!r.j.printers.length)f.appendChild(el('p','No printer found on this network.','s'));
@@ -132,10 +174,11 @@ $('find').onclick=async()=>{$('found').textContent='Searching...';const r=await 
     const u=el('button','Use');u.onclick=()=>setdev('printer','name='+x.name+'\nhost='+x.host+'\nport='+x.port+'\npath='+(x.path||'ipp/print')+'\nformat=pwg');
     d.appendChild(u);f.appendChild(d)})};
 async function me(){const r=await api('/api/x');if(!r.ok)return;const m=$('me');m.textContent='';
-  $('title').textContent=r.j.name;
-  [['Name',r.j.name],['Wi-Fi',r.j.wifi?r.j.wifi+(r.j.wifi5?' (5 GHz)':''):'none saved'],['Firmware',r.j.version]].forEach(([k,v])=>{
+  $('title').textContent=r.j.name;wifiNow=r.j.wifi||'';
+  [['Name',r.j.name],['Firmware',r.j.version]].forEach(([k,v])=>{
     const d=el('div',null,'row');d.appendChild(el('span',k,'n'));d.appendChild(el('span',v));m.appendChild(d)});
-  m.appendChild(el('p','To change the Wi-Fi network: Settings > Reset Wi-Fi on the X.','s'))}
+  const w=$('wifi');w.textContent='';const d=el('div',null,'row');d.appendChild(el('span','Saved network','n'));
+  d.appendChild(el('span',r.j.wifi?r.j.wifi+(r.j.wifi5?' (5 GHz)':' (2.4 GHz)'):'none saved'));w.appendChild(d)}
 $('go').onclick=async()=>{
   const r=await post('/api/login','pin='+encodeURIComponent($('pin').value));
   if(r.ok){say('');load();me()}else say(r.j.error||'Failed',true)};

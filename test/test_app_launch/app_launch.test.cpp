@@ -64,6 +64,31 @@ void test_arg_copy_gives_full_length_and_empty_default() {
   TEST_ASSERT_EQUAL(APP_EINVAL, app_arg_copy("x", out, 0));
 }
 
+// API 2.12 device_page_open: the phone page opens next at a section; app "" is the page
+void test_the_page_opens_next_at_a_section() {
+  TEST_ASSERT_EQUAL(0, app_launch_page(&rec, "configure", "trmnl-print"));
+  TEST_ASSERT_TRUE(app_launch_take(&rec, app, sizeof(app), arg, sizeof(arg)));
+  TEST_ASSERT_EQUAL_STRING("", app);
+  TEST_ASSERT_EQUAL_STRING("configure=trmnl-print", arg);
+  TEST_ASSERT_EQUAL(0, app_launch_page(&rec, "devices", nullptr));
+  TEST_ASSERT_TRUE(app_launch_take(&rec, app, sizeof(app), arg, sizeof(arg)));
+  TEST_ASSERT_EQUAL_STRING("devices", arg);
+  TEST_ASSERT_EQUAL(0, app_launch_set(&rec, "x", "a", true));
+  TEST_ASSERT_EQUAL(0, app_launch_page(&rec, "this-x", nullptr)); // replaces the app launch
+  TEST_ASSERT_TRUE(app_launch_take(&rec, app, sizeof(app), arg, sizeof(arg)));
+  TEST_ASSERT_EQUAL_STRING("", app);
+}
+
+void test_a_bad_page_section_records_nothing() {
+  TEST_ASSERT_EQUAL(APP_EINVAL, app_launch_page(&rec, "wifi", "x"));
+  TEST_ASSERT_EQUAL(APP_EINVAL, app_launch_page(&rec, "", "x"));
+  TEST_ASSERT_EQUAL(APP_EINVAL, app_launch_page(&rec, nullptr, "x"));
+  TEST_ASSERT_EQUAL(APP_EINVAL, app_launch_page(&rec, "configure", nullptr));
+  TEST_ASSERT_EQUAL(APP_EINVAL, app_launch_page(&rec, "configure", "../x")); // the fragment holds only a valid name
+  TEST_ASSERT_EQUAL(APP_EINVAL, app_launch_page(nullptr, "apps", nullptr));
+  TEST_ASSERT_FALSE(rec.pending);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_a_launch_is_recorded_and_taken_once);
@@ -72,5 +97,7 @@ int main(int, char **) {
   RUN_TEST(test_a_missing_app_is_enoent_and_keeps_an_earlier_launch);
   RUN_TEST(test_take_into_small_buffers_keeps_the_launch);
   RUN_TEST(test_arg_copy_gives_full_length_and_empty_default);
+  RUN_TEST(test_the_page_opens_next_at_a_section);
+  RUN_TEST(test_a_bad_page_section_records_nothing);
   return UNITY_END();
 }

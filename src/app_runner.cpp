@@ -9,6 +9,8 @@
 #include <app_keys.h>
 #include <app_path.h>
 #include <app_launch.h>
+
+#include "wifi_switch_x.h"
 #include <app_resume.h>
 #include <app_serial.h>
 #include <app_sleep_gate.h>
@@ -370,7 +372,7 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   }
   app_install_started(persistence, webshare_fs_root(), app_host.name); // it ran and ended well: no .bak needed
   if (!app_exit_asked && app_host_take_launch(next, next_len, next_arg, next_arg_len)) {
-    Log_event("Apps: %s ended, starting %s next", app_host.name, next);
+    Log_event("Apps: %s ended, starting %s next", app_host.name, next[0] ? next : "the phone page");
     return true;
   }
   show_last_image_and_sleep();
@@ -443,7 +445,9 @@ static int draw_big(const char *text, int x, int y, int scale, bool center, cons
   return h * scale;
 }
 
-void apps_install_session(void) {
+static char session_note[96]; // the last Wi-Fi switch's outcome, on the next page screen
+
+void apps_install_session(const char *section) {
   int rc = webshare_start_install();
   app_webshare_status_t st;
   webshare_status(&st);
@@ -468,11 +472,15 @@ void apps_install_session(void) {
     y += draw_big("Open on the same Wi-Fi", mid, y, 2, true, Inter_18) + 24;
   }
   y += draw_big(st.url, mid, y, 3, true, Roboto_Black_24) + 40;
+  if (session_note[0]) y += draw_big(session_note, mid, y, 2, true, Inter_18) + 30;
+  session_note[0] = '\0';
   y += draw_big("Code", mid, y, 2, true, Inter_18) + 25;
   y += draw_big(st.code, mid, y, 8, true, Roboto_Black_24) + 50;
   // the QR at least as large as before (12 px modules), left; the hints right of it
   int qr_top = y;
-  draw_qr(st.login_url, margin, qr_top);
+  char qr[sizeof(st.login_url) + APP_LAUNCH_ARG_MAX + 2]; // an app's device_page_open: the page opens at its section
+  snprintf(qr, sizeof(qr), "%s%s%s", st.login_url, section && section[0] ? "#" : "", section ? section : "");
+  if (!draw_qr(qr, margin, qr_top)) draw_qr(st.login_url, margin, qr_top); // too long for the code: the start
   int tx = margin + 700;
   int ty = qr_top + 60;
   ty += draw_big("Scan the code", tx, ty, 2, false, Inter_18) + 20;
@@ -484,12 +492,17 @@ void apps_install_session(void) {
   app_sleep_gate_screen("Install via Wi-Fi");
   Log_info("Apps: install screen shown, a long press stops it");
   touchbar_input_begin("Install via Wi-Fi");
-  bool test_page = false;
+  bool test_page = false, wifi = false;
+  static wsw_join_t join; // This X > Wi-Fi > Join: tried once the page has closed
   while (true) {
     delay(APP_POLL_MS * 5);
     if (pump_touch()) break;
     if (webshare_portal_take_test()) { // Devices > Printer > test page: the Print app prints it
       test_page = true;
+      break;
+    }
+    if (webshare_portal_take_wifi(&join)) {
+      wifi = true;
       break;
     }
     webshare_status(&st);
@@ -500,8 +513,16 @@ void apps_install_session(void) {
   }
   touchbar_input_end();
   app_sleep_gate_screen(nullptr);
+  webshare_radio_end(); // a keyboard pairing from the page
   webshare_stop();
   if (test_page) apps_run_arg(APPS_DIR "/trmnl-print.elf", "test"); // does not return
+  if (wifi) {
+    char ssid[sizeof(join.ssid)];
+    snprintf(ssid, sizeof(ssid), "%s", join.ssid);
+    wsw_result_t w = wifi_switch_x(&join);
+    snprintf(session_note, sizeof(session_note), w == WSW_JOINED ? "Now on \"%s\"" : "Could not join \"%s\": kept the old network", ssid);
+    apps_install_session(nullptr); // the page again, on the network in use; does not return
+  }
   show_last_image_and_sleep();
 }
 
@@ -511,6 +532,7 @@ void apps_run_arg(const char *path, const char *first_arg) {
   char next[APPS_PATH_MAX], next_app[32], arg[APP_LAUNCH_ARG_MAX + 1] = "";
   snprintf(arg, sizeof(arg), "%s", first_arg ? first_arg : "");
   while (apps_run_once(path, arg, next_app, sizeof(next_app), arg, sizeof(arg))) {
+    if (!next_app[0]) apps_install_session(arg); // device_page_open (API 2.12); does not return
     snprintf(next, sizeof(next), APPS_DIR "/%s.elf", next_app);
     path = next;
   }

@@ -33,6 +33,15 @@ void webshare_async_routes(AsyncWebServer &server, bool ap, const char *ap_url);
 // can; fills `ip` and `mdns_ok`. Its task runs until WP.running goes false, then closes everything itself.
 int webshare_modem_start(const char *host, char *ip, size_t ip_len, bool *mdns_ok);
 bool webshare_modem_alive(void); // the task has not finished its cleanup yet
+// A link id the page's server does not hold (for the printer search beside it), -1 when the phone holds all. Only
+// from the page's own task (a handler)
+int webshare_modem_free_link(void);
+
+// The page's Wi-Fi and Bluetooth (webshare_radio.cpp), for WEBSHARE_PORTAL
+int webshare_radio_scan(wsw_list_t *out);
+int webshare_radio_join(const wsw_join_t *j);
+int webshare_radio_ble(ws_ble_do_t what, int index);
+void webshare_radio_ble_info(ws_ble_info_t *out);
 
 // Starts the page in a profile (webshare.cpp): the public starts are this
 int webshare_start_profile(app_webshare_mode_t requested, int profile);

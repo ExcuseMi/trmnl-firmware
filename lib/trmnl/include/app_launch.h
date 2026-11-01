@@ -19,7 +19,13 @@ typedef struct {
 // an error; a second call replaces the first.
 int app_launch_set(app_launch_t *rec, const char *app, const char *arg, bool app_exists);
 
-// If a launch is pending: copies the app name and argument out, clears it, returns true
+// Records that the X's phone page (docs/apps.md "The X's page") opens next, at `section`: "configure" (the settings
+// form of `self`, the calling app), "apps", "devices" or "this-x". The record's app is "" (the page) and its argument
+// the page address's fragment ("configure=<self>", "devices"). 0 or APP_EINVAL (NULL, another section, a bad `self`);
+// it replaces an app launch, and the other way round
+int app_launch_page(app_launch_t *rec, const char *section, const char *self);
+
+// If a launch is pending: copies the app name ("" for the phone page) and argument out, clears it, returns true
 bool app_launch_take(app_launch_t *rec, char *app, size_t app_len, char *arg, size_t arg_len);
 
 // Copies the start argument `arg` (NULL: "") to `out` (cut to n - 1 bytes) and returns its full length, or APP_EINVAL

@@ -708,7 +708,7 @@ void menu_open(const menu_controls_t &controls) {
     apps_run(app_paths[app_chosen]); // does not return
     break;
   case MENU_OUTCOME_INSTALL:
-    apps_install_session(); // does not return
+    apps_install_session(nullptr); // does not return
     break;
   case MENU_OUTCOME_RESET_WIFI:
     Log_info("Resetting WiFi from the menu");

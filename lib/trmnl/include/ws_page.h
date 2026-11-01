@@ -112,5 +112,8 @@ bool ws_settings_apply(WsRequest &r, const asf_form_t *form, const ws_kv_t *kv, 
 
 extern const ws_route_t WS_ROUTES_PORTAL[];
 extern const int WS_ROUTES_PORTAL_N;
+extern const ws_route_t WS_ROUTES_RADIO[]; // the portal's Wi-Fi and Bluetooth (ws_page_radio.cpp)
+extern const int WS_ROUTES_RADIO_N;
+void ws_page_radio_reset(void); // at each start: Join needs a scan of this session
 extern const ws_route_t WS_ROUTES_WRITER[], WS_ROUTES_INSTALL[], WS_ROUTES_FILES[], WS_ROUTES_SETTINGS[];
 extern const int WS_ROUTES_WRITER_N, WS_ROUTES_INSTALL_N, WS_ROUTES_FILES_N, WS_ROUTES_SETTINGS_N;

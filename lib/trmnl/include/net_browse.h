@@ -38,6 +38,20 @@ bool nb_rp_clean(const char *rp, char *out, size_t n);
 // The address walk of the modem fallback: addresses of the /24 of `self` in order of distance (self+1, self-1,
 // self+2, ...), never self, .0 or .255. *step starts at 0. false when all are done
 bool nb_walk_next(uint32_t self, int *step, uint32_t *out);
+// The modem probe: ESP-AT runs one AT+CIPSTART at a time (the parser answers "busy" until the connect ends), so the
+// walk is sequential and each connect carries its own timeout (the AT firmware's default is 5 s, which made a /24
+// take minutes). The per-address wait so that the whole /24 fits `budget_ms`: 30..300 ms
+#define NB_PROBE_MIN_MS 30
+#define NB_PROBE_MAX_MS 300
+uint32_t nb_probe_ms(uint32_t budget_ms);
+// AT+CIPSTART for one probe: link < 0 is the single-link form (CIPMUX=0), else the link id next to the page's
+// server (CIPMUX=1); keep-alive and local IP left at their defaults, timeout_ms the connect's own limit. Its length,
+// 0 when the host is not an IPv4 text or it does not fit
+size_t nb_cipstart(char *out, size_t n, int link, const char *host, uint16_t port, uint32_t timeout_ms);
+// The link id for a probe while the page's server holds `used` (bit i: link i open): the highest free one below
+// `links`, -1 when every link is taken
+int nb_free_link(uint32_t used, int links);
+
 // "a.b.c.d" of an address in host order; parse back (false on anything else)
 void nb_ip_str(uint32_t ip, char *out, size_t n);
 bool nb_ip_parse(const char *s, uint32_t *ip);

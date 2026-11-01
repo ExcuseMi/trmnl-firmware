@@ -23,11 +23,11 @@ extern "C" {
 
 #define APP_API_VERSION 2 // 2: keyboards, USB drive, Wi-Fi page (docs/apps.md "API 2")
 // Calls added to a version without a new one: an app checks api->size >= APP_API_SLOT(n + 1) before call n
-#define APP_API_MINOR 11 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
+#define APP_API_MINOR 12 // 2.1: event_log_lines; 2.2: screen_orientation; 2.3: webshare_start_files;
                         // 2.4: ESP-NOW receive, touch hold; 2.5: orientation from the accelerometer;
                         // 2.6: keyboard layout, settings form; 2.7: USB pen tablet;
                         // 2.8: other apps' files, read only; 2.9: app_launch, app_arg;
-                        // 2.10: net_browse; 2.11: device settings
+                        // 2.10: net_browse; 2.11: device settings; 2.12: device_page_open
 
 // ---- app header ----
 
@@ -605,7 +605,7 @@ typedef struct app_api {
   // duplicates; cb runs before the call returns, on the app's thread. Connects Wi-Fi like net_up.
   // 2.4 GHz network: mDNS query from the S3, any service. Saved 5 GHz network: the modem has no mDNS query, so only
   // "_ipp._tcp" works and it probes the addresses of the modem's /24 for TCP 631 nearest first, then asks each hit for
-  // printer-make-and-model (a few addresses per second: the timeout bounds how far it walks). Returns the count
+  // printer-make-and-model (one short connect at a time: the timeout bounds how far it walks). Returns the count
   // (0: none found), APP_EINVAL (bad service or cb NULL), APP_ENOTSUP (the modem path and another service), APP_ENONET,
   // APP_EBUSY (ESP-NOW holds the radio), APP_ENOMEM or APP_EIO
   int (*net_browse)(const char *service, uint32_t timeout_ms, app_browse_cb_t cb, void *ctx);
@@ -621,6 +621,14 @@ typedef struct app_api {
   // Writes one, with the page's checks (for an app's own setup on the X, like Print's): 0, APP_ENOENT (unknown key),
   // APP_EINVAL (a value the checks refuse; len 0 restores the default) or APP_EIO
   int (*device_setting_set)(const char *key, const char *value, size_t len);
+
+  // ---- API 2.12 (api->size >= APP_API_SLOT(59)): sending people to the X's phone page ----
+
+  // Records that the X opens its phone page (Settings > Set up on phone) when this app returns from app_main, at
+  // `section`: "configure" (this app's settings form: an app's own "Settings" item), "apps", "devices" or "this-x".
+  // The page's QR carries the section; typing the code opens the start. Nothing opens at once; it replaces an
+  // app_launch and the other way round, and is lost like one (long press, error, crash). 0 or APP_EINVAL
+  int (*device_page_open)(const char *section);
 } app_api_t;
 
 #define APP_ORIENT_SETTLE_MS 1000
@@ -659,7 +667,8 @@ APP_API_ASSERT(offsetof(app_api_t, file_list_apps) == APP_API_SLOT(50), "API 2.8
 APP_API_ASSERT(offsetof(app_api_t, app_launch) == APP_API_SLOT(53), "API 2.9: launching after other apps' files");
 APP_API_ASSERT(offsetof(app_api_t, net_browse) == APP_API_SLOT(55), "API 2.10: net_browse after launching");
 APP_API_ASSERT(offsetof(app_api_t, device_setting_set) == APP_API_SLOT(57), "API 2.11: device settings after net_browse");
-APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(58), "API 2.11 has 58 calls: a new one raises APP_API_MINOR");
+APP_API_ASSERT(offsetof(app_api_t, device_page_open) == APP_API_SLOT(58), "API 2.12: the phone page after settings");
+APP_API_ASSERT(sizeof(app_api_t) == APP_API_SLOT(59), "API 2.12 has 59 calls: a new one raises APP_API_MINOR");
 APP_API_ASSERT(sizeof(app_pen_event_t) == sizeof(app_event_t), "a pen event fills an app_event_t");
 APP_API_ASSERT(offsetof(app_pen_event_t, x) == 2 && offsetof(app_pen_event_t, tilt_x) == 8 &&
                    offsetof(app_pen_event_t, changed) == 11, "app_pen_event_t is part of the app ABI");
@@ -669,6 +678,6 @@ APP_API_ASSERT(sizeof(app_espnow_pkt_t) == 258, "app_espnow_pkt_t is part of the
 APP_API_ASSERT(sizeof(app_local_time_t) == 16, "app_local_time_t is part of the app ABI");
 APP_API_ASSERT(sizeof(app_setting_decl_t) == 3 * sizeof(void *) + 12 + (sizeof(void *) == 8 ? 4 : 0),
                "app_setting_decl_t is part of the app ABI");
-APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 11, "a new version adds its own size check above");
+APP_API_ASSERT(APP_API_VERSION == 2 && APP_API_MINOR == 12, "a new version adds its own size check above");
 
 #endif // APP_API_H

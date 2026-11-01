@@ -72,6 +72,10 @@ uint32_t ble_pair_found(ble_pair_t *p, const ble_pair_peer_t *peer);
 // The touch bar on the list screen: 0 left, 1 middle, 2 right
 uint32_t ble_pair_touch(ble_pair_t *p, int zone);
 
+// The phone page picked keyboard `i` of the list (the same as moving there and pressing middle); 0 when there is
+// no such keyboard or the list is not up
+uint32_t ble_pair_pick(ble_pair_t *p, int i);
+
 uint32_t ble_pair_passkey(ble_pair_t *p, uint32_t passkey);
 uint32_t ble_pair_connected(ble_pair_t *p); // encrypted and the HID reports subscribed
 uint32_t ble_pair_failed(ble_pair_t *p, ble_fail_t why, uint32_t now_ms);

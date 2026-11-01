@@ -21,6 +21,7 @@
 #include "x_devset_x.h"
 
 #define PRINT_APP "trmnl-print" // its "test" start argument prints a test page on the default printer
+#define PRINTERS_MODEM_MS 15000 // the whole /24 at nb_probe_ms each
 
 static volatile bool test_pending;
 
@@ -33,9 +34,15 @@ static int dev_get(const char *key, char *buf, size_t cap) {
   return n == APP_ENOENT ? 0 : n;
 }
 
-// The 2.4 GHz path only: on the modem path the modem serves this page and cannot search at the same time
+// 2.4 GHz: mDNS from the S3. Through the modem (it serves this page): the /24 probe on a link beside the server
+// (Modem::serverProbeOpen), from this handler, which runs in the page's task (the UART's owner)
 static int printers_find(nb_list_t *out) {
-  if (S.modem) return APP_ENOTSUP;
+  if (S.modem) {
+    int link = webshare_modem_free_link();
+    if (link < 0) return APP_EBUSY; // the phone holds every link: try again
+    nb_list_init(out);
+    return app_net_browse_modem_beside(link, PRINTERS_MODEM_MS, out);
+  }
   if (WiFi.status() != WL_CONNECTED) return APP_ENONET;
   nb_list_init(out);
   return app_net_browse_s3("_ipp", "_tcp", 3000, out); // short: the web server's task waits for it
@@ -75,7 +82,7 @@ static void x_info(ws_x_info_t *x) {
 const ws_portal_env_t WEBSHARE_PORTAL = {
     app_meta,      app_store_decl_load, app_get,         app_set,     app_store_remove, app_store_changed, dev_get,
     x_devset_set,  printers_find,       printer_test,    ble_bond,    ble_keyboard_forget, usb_dev_log_seen,
-    x_info,
+    x_info,        webshare_radio_scan, webshare_radio_join, webshare_radio_ble, webshare_radio_ble_info,
 };
 
 #endif // BOARD_TRMNL_X

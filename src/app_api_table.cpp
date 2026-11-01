@@ -345,6 +345,14 @@ bool app_host_take_launch(char *app, size_t app_len, char *arg, size_t arg_len) 
 
 void app_host_clear_launch(void) { launch_next.pending = false; }
 
+// ---- API 2.12: the phone page next ----
+
+static int device_page_open(const char *section) {
+  int rc = app_launch_page(&launch_next, section, app_host.name);
+  Log_event("Apps: %s asks for the phone page at %s (%d)", app_host.name, section ? section : "?", rc);
+  return rc;
+}
+
 static int file_rename(const char *from, const char *to) {
   char a[APP_PATH_MAX + 64], b[APP_PATH_MAX + 64];
   if (!full_path(from, a, sizeof(a)) || !full_path(to, b, sizeof(b)) || !from[0] || !to[0]) return APP_EINVAL;
@@ -653,6 +661,7 @@ static const app_api_t table = {
     app_launch_call, app_arg_call,
     net_browse,
     x_devset_get,    x_devset_set,
+    device_page_open,
 };
 
 const app_api_t *app_api_table(void) {

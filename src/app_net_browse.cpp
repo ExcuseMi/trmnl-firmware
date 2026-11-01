@@ -41,7 +41,6 @@ int app_net_browse_s3(const char *service, const char *proto, uint32_t timeout_m
 
 // ---- the modem path ----
 
-#define PROBE_MS 300       // wait for a connect to one address
 #define STOP_AFTER 4       // printers found: enough
 #define IPP_REPLY_MAX 1400 // the head and attributes of the reply; the rest is not read
 
@@ -57,12 +56,11 @@ static bool have_body(void *) {
   return b && reply_n >= b + 8 + 80; // the IPP header and the first attributes are in
 }
 
-int app_net_browse_modem(uint32_t timeout_ms, nb_list_t *out) {
-  Modem *m = g_modem;
-  if (!m) return APP_ENONET;
-  uint32_t self = m->getIp();
+// One connect at a time (ESP-AT's parser runs one AT+CIPSTART), each with its own short timeout (nb_probe_ms)
+static int walk(Modem *m, int link, uint32_t timeout_ms, nb_list_t *out) {
+  uint32_t self = link >= 0 ? m->serverIp() : m->getIp();
   if (!self) return APP_ENONET;
-  uint32_t t0 = millis(), probed = 0;
+  uint32_t t0 = millis(), probed = 0, wait = nb_probe_ms(timeout_ms);
   int step = 0;
   uint32_t ip;
   while (out->n < STOP_AFTER && millis() - t0 < timeout_ms && nb_walk_next(self, &step, &ip)) {
@@ -70,25 +68,36 @@ int app_net_browse_modem(uint32_t timeout_ms, nb_list_t *out) {
     nb_ip_str(ip, host, sizeof(host));
     probed++;
     reply_n = 0;
-    if (!m->tcpOpen(host, 631, false, PROBE_MS, on_reply, nullptr, true)) continue;
+    bool open = link >= 0 ? m->serverProbeOpen(link, host, 631, wait, on_reply, nullptr)
+                          : m->tcpOpen(host, 631, false, wait, on_reply, nullptr, true);
+    if (!open) continue;
     uint8_t q[256];
     char head[256];
     size_t ql = nb_ipp_query(q, sizeof(q), host, 631, "ipp/print");
     size_t hl = ql ? nb_ipp_http_head(head, sizeof(head), host, 631, "ipp/print", ql) : 0;
     char model[NB_NAME_MAX] = "";
-    if (hl && m->tcpSend((const uint8_t *)head, hl, 3000) && m->tcpSend(q, ql, 3000)) {
+    bool sent = hl && (link >= 0 ? m->serverSend(link, (const uint8_t *)head, hl, 3000) && m->serverSend(link, q, ql, 3000)
+                                 : m->tcpSend((const uint8_t *)head, hl, 3000) && m->tcpSend(q, ql, 3000));
+    if (sent) {
       m->tcpPump(2000, have_body, nullptr);
       size_t b = nb_http_body_at(reply, reply_n);
       if (b) nb_ipp_model(reply + b, reply_n - b, model, sizeof(model));
     }
     bool http = reply_n >= 5 && memcmp(reply, "HTTP/", 5) == 0;
-    m->tcpClose();
+    if (link >= 0) m->serverProbeClose();
+    else m->tcpClose();
     // a port 631 that speaks HTTP is a print server; its model, else its address, names it
     if (model[0] || http) nb_list_add(out, model, host, 631, "ipp/print");
   }
-  Log_event("Net: browse modem: %u addresses probed, %d found, %lu ms", (unsigned)probed, out->n,
-            (unsigned long)(millis() - t0));
+  Log_event("Net: browse modem%s: %u addresses probed (%u ms each), %d found, %lu ms", link >= 0 ? " beside the page" : "",
+            (unsigned)probed, (unsigned)wait, out->n, (unsigned long)(millis() - t0));
   return out->n;
+}
+
+int app_net_browse_modem(uint32_t timeout_ms, nb_list_t *out) { return g_modem ? walk(g_modem, -1, timeout_ms, out) : APP_ENONET; }
+
+int app_net_browse_modem_beside(int link, uint32_t timeout_ms, nb_list_t *out) {
+  return g_modem && link >= 0 ? walk(g_modem, link, timeout_ms, out) : APP_ENONET;
 }
 
 #endif // BOARD_TRMNL_X

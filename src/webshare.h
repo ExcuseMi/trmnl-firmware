@@ -4,6 +4,7 @@
 // that is running (its folder is app_host.dir). The logic is in lib/trmnl/webshare_*.
 
 #include <app_api.h>
+#include <wifi_switch.h>
 
 int webshare_start(app_webshare_mode_t mode);
 void webshare_stop(void); // safe when not running, from any task except the page's own
@@ -19,6 +20,11 @@ bool webshare_modem_owns_uart(void);
 int webshare_start_install(void);
 // The X's page (the same profile): the person asked for a test page; true once, the session then starts the Print app
 bool webshare_portal_take_test(void);
+// The page asked to switch the Wi-Fi network (This X > Wi-Fi > Join): the network once, with its password; the
+// caller tries it after the page has closed (wifi_switch.h) and wipes it
+bool webshare_portal_take_wifi(wsw_join_t *out);
+// The page's keyboard pairing ends with the page
+void webshare_radio_end(void);
 // The device's own name ("TRMNL-X-BJRLAT", webshare_host.h): the access point's and the page's
 const char *webshare_device_name(void);
 

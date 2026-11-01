@@ -174,6 +174,7 @@ static void handle_printers_find(WsRequest &r) {
   int n = P()->printers_find(l);
   if (n < 0) {
     WP.env->big_free(l);
+    if (n == APP_EBUSY) return ws_send_error(r, 409, "the X is busy: close other tabs of this page and try again");
     return ws_send_error(r, n == APP_ENONET ? 503 : 500, n == APP_ENONET ? "no network" : "the search failed");
   }
   JsonDocument d;

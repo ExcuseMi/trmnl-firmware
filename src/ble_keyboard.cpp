@@ -93,6 +93,7 @@ typedef enum {
   M_NOTIFY, // status 1: an indication
   M_PARAMS, // a = how (PARAMS_*), status = our answer, data = ble_conn_params_t
   M_TAP,
+  M_PICK, // the phone page picked found[status]
   M_STOP,
 } msg_type_t;
 
@@ -123,6 +124,8 @@ static uint32_t screen_drawn_at;
 static bool screen_dirty;
 static uint32_t pending; // ble_pair_enable's actions, carried out once NimBLE is in sync
 static uint32_t enabled_at; // the app asked for the keyboard: full duty for BLE_SHARE_FULL_MS
+static ble_pair_t snap; // the pairing state for the phone page, copied by the task under snap_mux
+static portMUX_TYPE snap_mux = portMUX_INITIALIZER_UNLOCKED;
 
 enum { PARAMS_LL, PARAMS_L2CAP, PARAMS_UPDATED };
 
@@ -632,6 +635,9 @@ static void handle(const msg_t &m) {
   case M_TAP:
     apply(ble_pair_touch(&pair, m.status));
     break;
+  case M_PICK:
+    apply(ble_pair_pick(&pair, m.status));
+    break;
   case M_STOP:
     break;
   }
@@ -647,6 +653,9 @@ static void kbd_loop(void *arg) {
       if (!stop) handle(*m);
       continue;
     }
+    taskENTER_CRITICAL(&snap_mux);
+    snap = pair;
+    taskEXIT_CRITICAL(&snap_mux);
     uint32_t now = millis();
     hogp_do(hogp_tick(&hogp, now));
     apply(ble_pair_tick(&pair, now));
@@ -711,17 +720,15 @@ static void radio_stop(void) {
   Log_info("BLE keys: radio off; internal RAM %u free", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 }
 
-int ble_keyboard_enable(bool on) {
-  if (!on) {
-    ble_keyboard_end();
-    return 0;
-  }
+int ble_keyboard_enable(bool on) { return on ? ble_keyboard_start(false) : (ble_keyboard_end(), 0); }
+
+int ble_keyboard_start(bool new_keyboard) {
   if (running) return 0;
   if (!msgs) msgs = xQueueCreateWithCaps(24, sizeof(msg_t), MALLOC_CAP_SPIRAM);
   if (!msgs) return APP_ENOMEM;
   xQueueReset(msgs);
   ble_pair_peer_t bond;
-  bool bonded = ble_keyboard_bond(&bond);
+  bool bonded = !new_keyboard && ble_keyboard_bond(&bond); // a new one: the list (the old bond stays until it pairs)
   memset(&hogp, 0, sizeof(hogp));
   conn = BLE_HS_CONN_HANDLE_NONE;
   connected = false;
@@ -730,6 +737,7 @@ int ble_keyboard_enable(bool on) {
   hid_keys_init(&keys);
   // The rules first; their first actions wait in the task until NimBLE is in sync
   pending = ble_pair_enable(&pair, bonded ? &bond : nullptr);
+  snap = pair; // the task does not run yet: no lock needed
   synced = scanning = false;
   enabled_at = millis();
   if (!radio_start()) return APP_ENOMEM;
@@ -744,6 +752,20 @@ int ble_keyboard_enable(bool on) {
 
 bool ble_keyboard_connected(void) { return connected; }
 bool ble_keyboard_radio_on(void) { return running; }
+
+void ble_keyboard_pick(int i) {
+  msg_t m = {};
+  m.type = M_PICK;
+  m.status = i;
+  if (running) post(&m);
+}
+
+void ble_keyboard_pair_state(ble_pair_t *out) {
+  taskENTER_CRITICAL(&snap_mux);
+  *out = snap;
+  taskEXIT_CRITICAL(&snap_mux);
+  if (!running) out->state = BLE_PAIR_OFF;
+}
 
 bool ble_keyboard_tap(int zone) {
   if (!running || !screen_up) return false;

@@ -137,6 +137,12 @@ public:
   ///        Call before startPortal() so the portal shows these networks exclusively.
   void setNetworks(const std::vector<ExternalNetwork> &nets);
 
+  /// @brief Keeps a network the X has just joined (the phone page's Join) as the one in use; the others stay saved.
+  void saveJoined(const WifiCredentials &credentials) {
+    readWifiCredentials();
+    saveWifiCredentials(credentials);
+  }
+
   /// @brief Returns the last successfully used WiFi credentials (including is5GHz flag).
   WifiCredentials getLastCredentials();
 

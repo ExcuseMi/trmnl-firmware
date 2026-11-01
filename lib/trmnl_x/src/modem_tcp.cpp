@@ -14,7 +14,8 @@ void Modem::tcpOnLine(void *ctx, const char *line) {
   Modem *m = (Modem *)ctx;
   if (m->_srvEvent || m->_capPrefix) m->serverLine(line);
   size_t n = strlen(line);
-  if (strcmp(line, "CLOSED") == 0 || (n > 7 && strcmp(line + n - 7, ",CLOSED") == 0)) m->_closed = true;
+  bool closed = strcmp(line, "CLOSED") == 0 || (n > 7 && strcmp(line + n - 7, ",CLOSED") == 0);
+  if (closed && m->_probeLink < 0) m->_closed = true; // a probe's own link: serverLine (a phone's link is not it)
   if (m->_hit >= 0) return;
   for (size_t i = 0; i < m->_wantCount; i++) {
     if (strcmp(line, m->_want[i]) == 0) {
@@ -28,7 +29,9 @@ void Modem::tcpOnPrompt(void *ctx) { ((Modem *)ctx)->_prompt = true; }
 
 void Modem::tcpOnPayload(void *ctx, const uint8_t *data, size_t len) {
   Modem *m = (Modem *)ctx;
-  if (m->_srvData) m->_srvData(m->_srvCtx, m->_rx.link, data, len);
+  if (m->_probeLink >= 0 && m->_rx.link == m->_probeLink) {
+    if (m->_sink) m->_sink(m->_sinkCtx, data, len);
+  } else if (m->_srvData) m->_srvData(m->_srvCtx, m->_rx.link, data, len);
   else if (m->_sink) m->_sink(m->_sinkCtx, data, len);
 }
 
