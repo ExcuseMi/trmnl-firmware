@@ -11,6 +11,7 @@
 #include <trmnl_log.h>
 #include <usb/hid_host.h>
 #include <usb/usb_host.h>
+#include <usb_probe.h>
 
 #include "app_host.h"
 #include "evlog.h"
@@ -29,10 +30,21 @@ static QueueHandle_t conn_q, report_q;
 static hid_host_device_handle_t open_dev;
 static hid_keys_t keys;
 
+// A non-keyboard HID interface (a pen tablet): opened in report protocol, only logged (usb_probe.h)
+#define PROBE_SLOTS 4
+typedef struct {
+  hid_host_device_handle_t h; // nullptr: free
+  uint8_t iface;
+  usb_probe_t pr;
+} probe_slot_t;
+static probe_slot_t probes[PROBE_SLOTS];
+
 typedef struct {
   uint8_t len;
-  uint8_t data[HID_KEYS_REPORT];
+  uint8_t data[USB_PROBE_REPORT_BYTES];
   bool gone;
+  uint8_t probe; // 0: the keyboard, else probe slot + 1
+  uint32_t seq; // probe: which report of the interface
 } kbd_report_t;
 
 // ---- the expander, shared with the panel driver ----
@@ -64,22 +76,31 @@ static bool boost(bool on, uint32_t wait_ms) {
 // ---- USB host: install, run, stop ----
 
 static void iface_cb(hid_host_device_handle_t h, const hid_host_interface_event_t ev, void *arg) {
-  (void)arg;
+  probe_slot_t *ps = (probe_slot_t *)arg; // nullptr: the keyboard
   kbd_report_t r = {};
+  r.probe = ps ? (uint8_t)(ps - probes + 1) : 0;
   switch (ev) {
   case HID_HOST_INTERFACE_EVENT_INPUT_REPORT: {
-    uint8_t d[16];
+    uint8_t d[64];
     size_t n = 0;
     if (hid_host_device_get_raw_input_report_data(h, d, sizeof(d), &n) != ESP_OK) break;
     r.len = (uint8_t)(n < sizeof(r.data) ? n : sizeof(r.data));
     memcpy(r.data, d, r.len);
+    if (ps) {
+      r.seq = ps->pr.total + 1;
+      if (!usb_probe_report(&ps->pr)) break; // counted; past the first ones not queued
+    }
     xQueueSend(report_q, &r, 0); // a full queue drops it; never wait in the driver's task
     break;
   }
   case HID_HOST_INTERFACE_EVENT_DISCONNECTED:
     hid_host_device_close(h);
-    if (open_dev == h) open_dev = nullptr;
-    keyboard_open = false;
+    if (ps) {
+      if (ps->h == h) ps->h = nullptr;
+    } else {
+      if (open_dev == h) open_dev = nullptr;
+      keyboard_open = false;
+    }
     r.gone = true;
     xQueueSend(report_q, &r, 0);
     break;
@@ -147,6 +168,10 @@ static bool host_stop(uint32_t deadline) {
     open_dev = nullptr;
   }
   keyboard_open = false;
+  for (probe_slot_t &ps : probes) {
+    if (ps.h) hid_host_device_close(ps.h);
+    ps.h = nullptr;
+  }
   while (hid_host_uninstall() != ESP_OK) { // a device still listed: its removal (boost off) takes a moment
     if ((int32_t)(millis() - deadline) >= 0) return false;
     delay(20);
@@ -160,21 +185,72 @@ static bool host_stop(uint32_t deadline) {
   return true;
 }
 
-// A connected HID interface: opened if it is a boot keyboard and none is open yet
-static void open_keyboard(hid_host_device_handle_t h) {
-  hid_host_dev_params_t p;
-  if (hid_host_device_get_params(h, &p) != ESP_OK) return;
-  if (p.sub_class != HID_SUBCLASS_BOOT_INTERFACE || p.proto != HID_PROTOCOL_KEYBOARD || open_dev) return;
-  const hid_host_device_config_t dc = {.callback = iface_cb, .callback_arg = nullptr};
-  if (hid_host_device_open(h, &dc) != ESP_OK) return;
-  open_dev = h;
-  hid_class_request_set_protocol(h, HID_REPORT_PROTOCOL_BOOT); // many start in it already: not fatal
-  hid_class_request_set_idle(h, 0, 0);
-  if (hid_host_device_start(h) != ESP_OK) {
-    hid_host_device_close(h);
-    open_dev = nullptr;
+// Logs the device and the interface with its report descriptor in hex (the probe: what does an unknown device send?)
+static void log_interface(hid_host_device_handle_t h, const hid_host_dev_params_t &p) {
+  hid_host_dev_info_t info;
+  bool got = hid_host_get_device_info(h, &info) == ESP_OK;
+  evlog_add("HID i%u sc%u p%u %04x:%04x", p.iface_num, p.sub_class, p.proto, got ? info.VID : 0, got ? info.PID : 0);
+  size_t len = 0;
+  const uint8_t *d = hid_host_get_report_descriptor(h, &len);
+  if (!d || !len) {
+    evlog_add("HID i%u: no report descriptor", p.iface_num);
     return;
   }
+  size_t lines = usb_probe_desc_lines(len);
+  for (size_t l = 0; l < lines; l++) {
+    size_t off = 0, n = usb_probe_desc_line(len, l, &off);
+    char hex[USB_PROBE_HEX_CAP];
+    usb_probe_hex(hex, sizeof(hex), d + off, n);
+    evlog_add("HID i%u d%u/%u @%u: %s", p.iface_num, (unsigned)(l + 1), (unsigned)lines, (unsigned)off, hex);
+  }
+  if (len > USB_PROBE_DESC_MAX) evlog_add("HID i%u descriptor %u bytes, first %u shown", p.iface_num, (unsigned)len, USB_PROBE_DESC_MAX);
+}
+
+// A connected HID interface: a boot keyboard is opened as the keyboard (none yet); any other interface is opened in
+// report protocol for the probe. Every interface is logged.
+static void open_interface(hid_host_device_handle_t h) {
+  hid_host_dev_params_t p;
+  if (hid_host_device_get_params(h, &p) != ESP_OK) return;
+  bool as_kbd = p.sub_class == HID_SUBCLASS_BOOT_INTERFACE && p.proto == HID_PROTOCOL_KEYBOARD && !open_dev;
+  probe_slot_t *ps = nullptr;
+  if (!as_kbd) {
+    for (probe_slot_t &s : probes) {
+      if (!s.h) {
+        ps = &s;
+        break;
+      }
+    }
+    if (!ps) {
+      evlog_add("HID i%u: no free probe slot", p.iface_num);
+      return;
+    }
+  }
+  const hid_host_device_config_t dc = {.callback = iface_cb, .callback_arg = ps};
+  esp_err_t rc = hid_host_device_open(h, &dc);
+  if (rc != ESP_OK) {
+    evlog_add("HID i%u: open failed: %s", p.iface_num, esp_err_to_name(rc));
+    return;
+  }
+  log_interface(h, p);
+  if (as_kbd) {
+    open_dev = h;
+    hid_class_request_set_protocol(h, HID_REPORT_PROTOCOL_BOOT); // many start in it already: not fatal
+  } else {
+    ps->h = h;
+    ps->iface = p.iface_num;
+    usb_probe_init(&ps->pr, millis());
+    hid_class_request_set_protocol(h, HID_REPORT_PROTOCOL_REPORT); // not fatal
+  }
+  hid_class_request_set_idle(h, 0, 0);
+  rc = hid_host_device_start(h);
+  if (rc != ESP_OK) {
+    evlog_add("HID i%u: start failed: %s", p.iface_num, esp_err_to_name(rc));
+    hid_host_device_close(h);
+    if (ps) ps->h = nullptr;
+    else open_dev = nullptr;
+    return;
+  }
+  if (!as_kbd) return;
   hid_keys_init(&keys);
   keyboard_open = true;
   Log_event("USB keys: keyboard connected");
@@ -183,7 +259,22 @@ static void open_keyboard(hid_host_device_handle_t h) {
 static void drain_reports(void) {
   kbd_report_t r;
   app_event_t ev[HID_KEYS_MAX_EVENTS];
+  for (probe_slot_t &ps : probes) {
+    uint32_t n;
+    if (ps.h && usb_probe_summary(&ps.pr, millis(), &n)) evlog_add("HID i%u: %lu reports", ps.iface, (unsigned long)n);
+  }
   while (xQueueReceive(report_q, &r, 0) == pdTRUE) {
+    if (r.probe) {
+      probe_slot_t &ps = probes[r.probe - 1];
+      if (r.gone) {
+        evlog_add("HID i%u gone after %lu reports", ps.iface, (unsigned long)ps.pr.total);
+      } else {
+        char hex[USB_PROBE_REPORT_BYTES * 3];
+        usb_probe_hex(hex, sizeof(hex), r.data, r.len);
+        evlog_add("HID i%u #%lu: %s", ps.iface, (unsigned long)r.seq, hex);
+      }
+      continue;
+    }
     if (r.gone) {
       keyboards_post(ev, hid_keys_release_all(&keys, ev)); // no key stays down
       Log_event("USB keys: keyboard removed");
@@ -206,7 +297,7 @@ static void port_loop(void *arg) {
   while (true) {
     hid_host_device_handle_t h;
     if (xQueueReceive(conn_q, &h, pdMS_TO_TICKS(USB_PORT_POLL_MS)) == pdTRUE && applied == USB_PORT_HOST) {
-      open_keyboard(h);
+      open_interface(h);
     }
     drain_reports();
     if (keyboard_open != was_open) {
@@ -263,7 +354,7 @@ int usb_keyboard_enable(bool on) {
   wanted = on;
   if (!on || port_task) return 0;
   if (!conn_q) conn_q = xQueueCreate(4, sizeof(hid_host_device_handle_t));
-  if (!report_q) report_q = xQueueCreate(16, sizeof(kbd_report_t));
+  if (!report_q) report_q = xQueueCreate(48, sizeof(kbd_report_t));
   if (!conn_q || !report_q) return APP_ENOMEM;
   stop_task = false;
   if (xTaskCreatePinnedToCore(port_loop, "usb_port", 4096, nullptr, 3, &port_task, 0) != pdPASS) return APP_ENOMEM;

@@ -153,6 +153,7 @@ Keyboard host mode (`usb_port_step`, applied by `src/usb_keyboard.cpp`): device 
 | host mode, no keyboard within 3 s / keyboard removed | device mode, next probe after 10 s |
 | restart, crash, deep sleep | device mode: the switch-back of "USB port roles" |
 | the USB drive shows | device mode, no probe until it ends |
+| any HID device in host mode | probe (`usb_probe.h`): event log `HID i<n> ...` lines with VID:PID, the report descriptor in hex, and for non-keyboard interfaces (pen tablet) the first 40 input reports then a count every 2 s; read with `TAPP EVLOG` |
 | USB stack does not stop within 1 s, or the boost cannot be switched off within 8 s (a refresh holds the expander) | restart (which starts in device mode) |
 
 ## Wi-Fi page (last resort for moving files)
