@@ -9,8 +9,6 @@
 #define APP_UPLOAD_MAX 2097152u // apps.upload_max_bytes
 #define APP_UPLOAD_MARGIN 16384u // apps.upload_margin_bytes
 // wifi_page
-#define WS_AP_SSID "Writer" // wifi_page.ap_ssid
-#define WS_HOST "writer" // wifi_page.host_name
 #define WS_PAGE_TITLE "Writer files" // wifi_page.page_title
 #define WS_IDLE_S 900u // wifi_page.idle_s
 #define WS_FAILS_PER_ROUND 5u // wifi_page.fails_per_lock

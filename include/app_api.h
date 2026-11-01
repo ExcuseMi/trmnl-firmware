@@ -41,7 +41,7 @@ typedef struct {
   uint32_t magic; // APP_INFO_MAGIC
   uint32_t api_version; // the APP_API_VERSION the app was built against
   uint32_t stack_size; // bytes for the app's task (internal RAM); 0 for the default (APP_DEFAULT_STACK)
-  char name[32]; // shown in the Apps menu, NUL-terminated
+  char name[32]; // the display name in the Apps menu ("Sketch", "Game Boy"), NUL-terminated
 } app_info_t;
 
 #define APP_DEFAULT_STACK (16 * 1024)
@@ -58,6 +58,18 @@ typedef struct {
   APP_INFO_LINKAGE __attribute__((used, aligned(4))) const uint32_t app_rodata_align = 0;                              \
   APP_INFO_LINKAGE __attribute__((used, section(APP_INFO_SECTION))) const app_info_t app_info = {                      \
       APP_INFO_MAGIC, APP_API_VERSION, (stack), app_name}
+
+// Optional icon for the Apps menu: a 64x64 1-bit bitmap in its own ELF section, read by the firmware without running
+// the app (no API slot). Rows top to bottom, 8 bytes per row, MSB leftmost, 1 = white (as APP_SCREEN_1BIT): exactly
+// APP_ICON_BYTES bytes, else the section is ignored. Without one the menu draws the name's first letter.
+//   APP_ICON(0xFF, 0xFF, ...);   // 512 values; or  #define MY_ICON 0xFF, ...  then  APP_ICON(MY_ICON);
+// apps/icon_c.py turns a 64x64 PBM into such a define. Keep the link: apps/build.sh does (-Wl,--undefined=app_icon).
+#define APP_ICON_SECTION ".trmnl_app_icon"
+#define APP_ICON_SIZE 64
+#define APP_ICON_BYTES (APP_ICON_SIZE * APP_ICON_SIZE / 8)
+#define APP_ICON(...)                                                                                                  \
+  APP_INFO_LINKAGE __attribute__((used, aligned(4), section(APP_ICON_SECTION))) const unsigned char                    \
+      app_icon[APP_ICON_BYTES] = {__VA_ARGS__}
 
 // ---- screen ----
 
@@ -305,23 +317,23 @@ typedef struct {
 // A page on the X's own Wi-Fi network (with a captive portal) or on the home network at <host>.local, where a phone
 // browser lists, downloads (one file or a zip), uploads, renames and deletes the app's `documents/` files and adds
 // fonts to `settings/fonts/`. Network name, host name, limits and timeouts are the firmware's config/apps.json
-// (by default "Writer", writer.local, 15 min); the names below are those defaults. Nothing is ever overwritten: an
+// (access point and mDNS name are the device's own, e.g. "TRMNL-X-BJRLAT" / trmnl-x-bjrlat.local; 15 min); the names below are those defaults. Nothing is ever overwritten: an
 // upload that meets a different file of the same name is kept next to it as "name (web N).ext". The page is off
 // until the app starts it, and off again when the app ends or after the idle time (status.idle_left_s). A 6-digit
 // code, shown by the app, must be typed on the page first (docs/apps.md).
 typedef enum {
   APP_WEBSHARE_AUTO = 0, // the default: the saved home network, so the phone stays on its Wi-Fi; only when none is
                          // reachable the access point below (webshare_status says which)
-  APP_WEBSHARE_AP = 1, // own access point "Writer", open, address http://4.3.2.1 (the phone's captive portal opens it)
-  APP_WEBSHARE_HOME = 2, // on the saved home network, http://writer.local (2.4 GHz only, like net_up)
+  APP_WEBSHARE_AP = 1, // own access point named like the device, open, address http://4.3.2.1 (the phone's captive portal opens it)
+  APP_WEBSHARE_HOME = 2, // on the saved home network, http://<device>.local (2.4 GHz only, like net_up)
 } app_webshare_mode_t;
 
 typedef struct {
   bool running;
   int32_t mode; // APP_WEBSHARE_HOME or APP_WEBSHARE_AP: what is in use
   char code[8]; // the 6 digits to type on the page, NUL-terminated
-  char network[33]; // AP mode: the network to join ("Writer"); empty otherwise
-  char address[40]; // what to open: "http://4.3.2.1" (AP) or "http://writer.local" (HOME)
+  char network[33]; // AP mode: the network to join (the device's name); empty otherwise
+  char address[40]; // what to open: "http://4.3.2.1" (AP) or "http://trmnl-x-bjrlat.local" (HOME)
   char ip[16]; // the X's address (4.3.2.1 for the access point)
   char url[32]; // "http://<ip>/": show it as "Online at ..."
   char login_url[72]; // "http://<ip>/?t=<128-bit token>": for the QR. One login only, gone at stop or after 15 min;

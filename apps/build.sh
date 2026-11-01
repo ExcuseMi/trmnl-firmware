@@ -34,9 +34,12 @@ for app in $apps; do
       case $a in -I*) echo "-I$(realpath "${a#-I}")" ;; *) realpath "$a" ;; esac
     done)
   fi
+  # an app with an icon (APP_ICON, app_api.h) keeps its section through --gc-sections
+  icon=
+  if grep -qs 'APP_ICON(' "$dir"/*.c "$dir"/*.h; then icon=-Wl,--undefined=app_icon; fi
   "$cc" -std=gnu11 -Os -Wall -Wextra -Werror -mlongcalls -I "$here/../include" -I "$here" \
     -nostartfiles -nostdlib -fPIC -shared -e app_main -fdata-sections -ffunction-sections \
-    -Wl,--gc-sections -Wl,--undefined=app_info -Wl,--undefined=app_rodata_align -fvisibility=hidden \
+    -Wl,--gc-sections -Wl,--undefined=app_info -Wl,--undefined=app_rodata_align $icon -fvisibility=hidden \
     -Wl,--strip-all -Wl,--strip-debug \
     "$dir"/*.c $extra -o "$out/$name.elf" -lgcc
   "$strip" --strip-unneeded --remove-section=.comment --remove-section=.got.loc --remove-section=.dynamic \

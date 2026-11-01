@@ -19,8 +19,6 @@ KEYS = [
     ("apps", "data_dir", "APPS_DATA_DIR", "path", 15),
     ("apps", "upload_max_bytes", "APP_UPLOAD_MAX", "int", (4096, 8 << 20)),
     ("apps", "upload_margin_bytes", "APP_UPLOAD_MARGIN", "int", (0, 1 << 20)),
-    ("wifi_page", "ap_ssid", "WS_AP_SSID", "str", 32),
-    ("wifi_page", "host_name", "WS_HOST", "host", 24),
     ("wifi_page", "page_title", "WS_PAGE_TITLE", "str", 40),
     ("wifi_page", "idle_s", "WS_IDLE_S", "int", (60, 24 * 3600)),
     ("wifi_page", "fails_per_lock", "WS_FAILS_PER_ROUND", "int", (1, 100)),

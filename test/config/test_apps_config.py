@@ -126,7 +126,7 @@ def test_no_configured_value_is_left_in_our_sources():
 def test_the_check_sees_a_literal_and_a_define(tmp_path):
     values = gen.load()
     bad = tmp_path / "bad.cpp"
-    bad.write_text('// "Writer" in a comment is fine\nstatic const char *ssid = "Writer";\n'
+    bad.write_text('// "Writer files" in a comment is fine\nstatic const char *ssid = "Writer files";\n'
                    '#define WS_LOCK_MS 5\nconst char *p = R"X(<title>Writer files</title>)X";\n'
                    'const char *d = "/apps/%s.elf";\n')
     found = leftovers([bad], values)
@@ -155,9 +155,7 @@ def test_unknown_keys_and_bad_values_are_refused(tmp_path):
         (lambda c: c["wifi_page"].update(ap_sid="x"), "unknown key"),
         (lambda c: c.update(extra={}), "unknown section"),
         (lambda c: c["wifi_page"].update(idle_s="900"), "whole number"),
-        (lambda c: c["wifi_page"].update(ap_ssid="x" * 33), "printable ASCII"),
         (lambda c: c["wifi_page"].update(page_title='a"b'), "no quote"),
-        (lambda c: c["wifi_page"].update(host_name="My Host"), "host name"),
         (lambda c: c["apps"].update(dir="apps"), "one folder"),
         (lambda c: c["usb_drive"].update(volume_label="lower"), "FAT label"),
         (lambda c: c["usb_drive"].update(scsi_vendor="NINECHARS"), "printable ASCII"),

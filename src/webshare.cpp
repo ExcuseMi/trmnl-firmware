@@ -1,4 +1,4 @@
-// The writer's Wi-Fi page: an HTTP server on the X's own access point "Writer" or on the home network, for a phone
+// The writer's Wi-Fi page: an HTTP server on the X's own access point or on the home network, for a phone
 // browser. All decisions (names, code, no-overwrite, atomic writes, zip) are in lib/trmnl/webshare_*; this file
 // only connects them to the network and LittleFS.
 #ifdef BOARD_TRMNL_X
@@ -21,6 +21,10 @@
 #include <webshare_store.h>
 #include <webshare_apps.h>
 #include <webshare_zip.h>
+#include <webshare_host.h>
+#include <config.h>
+#include <wifi_network.h>
+#include <esp_mac.h>
 
 #include <apps.h>
 
@@ -30,6 +34,15 @@
 
 #define WS_AP_URL "http://4.3.2.1"
 #define WS_LIST_MAX 200
+
+// The device's own name for the access point and mDNS (webshare_host.h), made at each start
+static char dev_ssid[WS_HOST_MAX + 1], dev_host[WS_HOST_MAX + 1];
+
+static void make_dev_names(void) {
+  uint8_t mac[6] = {};
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  ws_host_names(getWifiClientHostname().c_str(), WIFI_CLIENT_HOSTNAME_PREFIX, mac, dev_ssid, dev_host);
+}
 
 // ---- LittleFS under the app's folder ----
 
@@ -298,7 +311,7 @@ static void handle_zip(AsyncWebServerRequest *r) {
         S.last_request = millis();
         return (size_t)n;
       });
-  res->addHeader("Content-Disposition", "attachment; filename=\"" WS_HOST "-documents.zip\"");
+  res->addHeader("Content-Disposition", String("attachment; filename=\"") + dev_host + "-documents.zip\"");
   res->addHeader("Cache-Control", "no-store");
   r->onDisconnect([job]() {
     ws_zip_end(&job->z);
@@ -529,6 +542,7 @@ int webshare_start_profile(app_webshare_mode_t requested, int profile) {
   if (!ws_pick_mode(requested, wifi_up, &mode)) return APP_ENONET;
   if (mode == APP_WEBSHARE_AP) Log_info("webshare: no home network, using the access point");
 
+  make_dev_names();
   xSemaphoreTake(S.lock, portMAX_DELAY);
   S.install = install;
   S.files = profile == WS_PROFILE_FILES;
@@ -562,15 +576,15 @@ int webshare_start_profile(app_webshare_mode_t requested, int profile) {
     if (!S.dns) {
       rc = APP_ENOMEM;
     } else {
-      captive_ap_up(IPAddress(4, 3, 2, 1), WS_AP_SSID, nullptr, *S.dns);
-      snprintf(S.network, sizeof(S.network), "%s", WS_AP_SSID);
+      captive_ap_up(IPAddress(4, 3, 2, 1), dev_ssid, nullptr, *S.dns);
+      snprintf(S.network, sizeof(S.network), "%s", dev_ssid);
       snprintf(S.address, sizeof(S.address), "%s", WS_AP_URL);
       snprintf(S.ip, sizeof(S.ip), "4.3.2.1");
     }
   } else {
     MDNS.end(); // the setup code started one with the device's own host name
-    if (!MDNS.begin(WS_HOST)) Log_error("webshare: mDNS failed, use the address");
-    snprintf(S.address, sizeof(S.address), "http://%s.local", WS_HOST);
+    if (!MDNS.begin(dev_host)) Log_error("webshare: mDNS failed, use the address");
+    snprintf(S.address, sizeof(S.address), "http://%s.local", dev_host);
     snprintf(S.ip, sizeof(S.ip), "%s", WiFi.localIP().toString().c_str());
   }
   if (rc == 0) {

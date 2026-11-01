@@ -9,7 +9,8 @@ The firmware calls `int app_main(const app_api_t *api)`. Return 0 when done, any
 
 | Field | Meaning |
 |---|---|
-| `app_info` | in section `.trmnl_app_info` (macro `APP_INFO(name, stack)`): magic, API version, stack size, name |
+| `app_info` | in section `.trmnl_app_info` (macro `APP_INFO(name, stack)`): magic, API version, stack size, name (the display name in the Apps menu, e.g. "Game Boy") |
+| `app_icon` | optional, section `.trmnl_app_icon` (macro `APP_ICON(...)`): 64x64, 1 bit, 8 bytes per row, MSB leftmost, 1 = white, exactly 512 bytes else ignored; no API slot. Name and icon are read from the file without running it (`lib/trmnl/src/app_meta.cpp`); no icon: a frame with the name's first letter; no valid `app_info`: the file name (`my_app` shows "My app"). `apps/icon_c.py in.pbm MY_ICON > icon.h`, then `APP_ICON(MY_ICON);`. `apps/build.sh` keeps the section (`-Wl,--undefined=app_icon`) when a source has `APP_ICON(` |
 | `api->version`, `api->size` | firmware's API version and table size; new calls go at the end only |
 
 | Group | Calls |
@@ -83,6 +84,8 @@ The radio is on only while an app has `APP_KBD_BLE` enabled; TRMNL's own refresh
 | wrong passkey / refused | the list again, "Pairing failed: try again" |
 | passkey not typed in 40 s (SMP gives up at 30 s) | the list again, "The passkey was not typed in time" |
 | not a keyboard (no HID service, no keyboard report, no boot input) | the list again, "That is not a keyboard" |
+| Apps menu | `Open an app` (grid, 4x2 landscape / 2x4 portrait in all four orientations, icon and name, most recently used first, a Back tile last, page squares when more than 8; touch bar left / middle select / right; full refresh on open and page change, moving inside a page is partial), `Receive over USB`, `Install via Wi-Fi`, `Remove an app`, Back. Logic `lib/trmnl/src/app_grid.cpp`, drawing `src/menu_apps.cpp` |
+| Remove an app | the same grid, then "Remove <name>? Its saved files stay." (removes `apps/<name>.elf` and its `.bak` only; `appdata/<name>` stays). "Remove with its files" asks a second time and then erases `appdata/<name>`. The running or resuming app is refused. `lib/trmnl/src/app_remove.cpp` |
 | Apps menu | "Forget <name>" while a keyboard is bonded: both records cleared, the next app pairs again |
 | Wi-Fi at the same time | software coexistence (`CONFIG_ESP_COEX_SW_COEXIST_ENABLE`, a build error without it); Wi-Fi modem sleep while BLE is on (during and after an app's `net_up` join, and when BLE starts with Wi-Fi up); scan window 30 ms of 50 ms for listing and for connecting (NimBLE's default connect scan holds the radio the whole attempt); rules in `radio_share.h`, test `test_radio_share` |
 | `net_up` log | one line per call: `Net: up in N ms (already/joined, rssi, ble ...)` or `Net: failed: <reason> after N ms, wl_status, rssi, ble ..., internal RAM N free`; an HTTP request that fails to open logs `Net: <method> open: no memory|failed, 0x<esp_err> tls 0x<ESP-TLS esp_err> -0x<mbedTLS code>, int <internal free>/<largest block>, psram <largest block>` (RAM measured before the open; the error names on the serial log) |
@@ -194,8 +197,8 @@ Names, limits and times below are the defaults of "Configuration".
 | Off by default | only `webshare_start(APP_WEBSHARE_AP or APP_WEBSHARE_HOME)` from the app; off when the app ends (runner), after 15 min without a request, after 15 wrong codes |
 | Default (`APP_WEBSHARE_AUTO`) | the saved home network, so the phone stays on its Wi-Fi; only if none is reachable the access point. `status.mode` says which. `APP_WEBSHARE_HOME` alone does not fall back (`APP_ENONET`) |
 | One-time link | `status.url` ("Online at ...") and `status.login_url` (`/?t=<128-bit token>`, for a QR): one login, 15 min, gone at stop, a wrong token counts like a wrong code, never logged (test reads the source). Typing the code works too. Changed in place: API 2 is not released |
-| AP mode | open network "Writer", `http://4.3.2.1`, phones open it as a captive portal |
-| Home network | saved 2.4 GHz network, `http://writer.local` (mDNS) and the IP in `status.ip` |
+| AP mode | open network named like the device ("TRMNL-X-BJRLAT": its Wi-Fi host name, `webshare_host.h`; with only the board prefix, the last 3 MAC bytes are added), `http://4.3.2.1`, phones open it as a captive portal |
+| Home network | saved 2.4 GHz network, `http://<device name lowercase>.local` (e.g. `trmnl-x-bjrlat.local`, mDNS) and the IP in `status.ip` |
 | Code | 6 digits in `status.code`, the app shows it on the X's screen; no API works without a session from `POST /api/login`; 5 wrong codes lock 60 s (doubling), 15 stop the page |
 | Changes | need the `X-Writer` header (another site's form cannot send it) and the session cookie (SameSite=Strict) |
 | No silent overwrite | upload to `.webshare.tmp` in the target folder, renamed when all announced bytes arrived and the file on disk has that size; same bytes: nothing written; other bytes: saved as `title (web N).md`, the old file untouched; rename onto an existing name is refused |
@@ -295,8 +298,6 @@ header is stale, a key is missing, or one of these values (or a `#define` of its
 | `apps.data_dir` | `APPS_DATA_DIR` | `/appdata` | each app's folder is `<data_dir>/<name>` |
 | `apps.upload_max_bytes` | `APP_UPLOAD_MAX` | 2097152 | largest app, over USB serial or Wi-Fi |
 | `apps.upload_margin_bytes` | `APP_UPLOAD_MARGIN` | 16384 | left free on the file system by an app upload |
-| `wifi_page.ap_ssid` | `WS_AP_SSID` | `Writer` | the X's own open access point |
-| `wifi_page.host_name` | `WS_HOST` | `writer` | mDNS name (`<host>.local`) and the zip's name `<host>-documents.zip` |
 | `wifi_page.page_title` | `WS_PAGE_TITLE` | `Writer files` | the page's title and heading |
 | `wifi_page.idle_s` | `WS_IDLE_S` | 900 | the page switches off after this long without a request; the one-time link's life |
 | `wifi_page.fails_per_lock` | `WS_FAILS_PER_ROUND` | 5 | wrong codes before a lock |
@@ -320,7 +321,7 @@ header is stale, a key is missing, or one of these values (or a `#define` of its
 ## Install via Wi-Fi (proof of concept)
 
 Menu > Apps > "Install via Wi-Fi" starts the same web server in an apps profile: home Wi-Fi first, else the access
-point "Writer". The X shows "Online at http://<ip>/" (or the network to join), the 6-digit code and a QR of the
+point named like the device. The X shows "Online at http://<ip>/" (or the network to join), the 6-digit code and a QR of the
 one-time login link; a long press, 15 min idle, or 15 wrong codes stop it. The page lists `/apps` (name, size, date)
 and takes `.elf` files only. No manifest, no permissions, no update URLs.
 
@@ -436,6 +437,8 @@ status: the switch can take the window of a touch event, and that touch then nev
 | What | Where | Run |
 |---|---|---|
 | ELF checks (truncation, arch, tables, relocations, app_info, memory, random damage) | `test/test_app_elf_check` | `pio test -e native -f test_app_elf_check` |
+| App name and icon, grid in 4 orientations, MRU order, removal keeps data; `LAUNCHER_PBM_DIR=dir` also writes the layouts as .pbm | `test/test_app_launcher` | `pio test -e native -f test_app_launcher` |
+| Device name for the access point and mDNS | `test/test_webshare_host` | `pio test -e native -f test_webshare_host` |
 | paths, resume state, serial keys, upload header and CRC | `test/test_app_path`, `test_app_resume`, `test_app_keys`, `test_app_upload` | `pio test -e native -f test_app_*` |
 | pen tablet: interface roles (never the keyboard), full-mode reports from the owner's tablet (hover, tip, leave, tilt, each button down and up), the standard report 07, short, wrong id and garbage reports, scaling ends, the merging queue (moves merged, changes kept in order, full queue) | `test/test_usb_pen` | `pio test -e native -f test_usb_pen` |
 | pen and mouse together: pen owns the cursor, hand-over position, button release, held button masked, stale out-of-range frames, either unplugged | `test/test_usb_cursor` | `pio test -e native -f test_usb_cursor` |
@@ -526,8 +529,8 @@ Needs an app that calls `webshare_start` and shows `status.code`. Take a phone a
 | Step | Look for |
 |---|---|
 | Start with Wi-Fi on (default) | `status.mode` home; phone on its own Wi-Fi opens `status.url`; the QR link logs in at once, the same link a second time asks for the code |
-| Start with the router off | falls back to "Writer", `status.mode` AP |
-| Start AP mode (forced) | network "Writer" appears, phone opens the page by itself (captive portal; if not, `http://4.3.2.1`), X shows the code |
+| Start with the router off | falls back to the access point, `status.mode` AP |
+| Start AP mode (forced) | a network named like the device appears, phone opens the page by itself (captive portal; if not, `http://4.3.2.1`), X shows the code |
 | Open the page, type a wrong code 5 times | "too many wrong codes", the right code is refused for a minute |
 | Right code | list of documents and fonts, free space |
 | Upload a .md to a folder, then the same again, then a changed copy | "saved", "already on the X", "kept both, saved as ... (web 1)"; the writer shows both files; the first is unchanged |
@@ -537,9 +540,9 @@ Needs an app that calls `webshare_start` and shows `status.code`. Take a phone a
 | Delete a document | gone from the writer's list |
 | Download all as zip | opens on the phone and PC, same files and sizes |
 | Add a .ttf | appears under Fonts; writer can use it |
-| Leave it 15 min | page stops answering, "Writer" network gone; the app's status says not running |
+| Leave it 15 min | page stops answering, access point gone; the app's status says not running |
 | Long press (leave the app) while the page is on | network gone |
-| Home mode with the home Wi-Fi | `writer.local` opens on PC and iPhone; on Android use the IP |
+| Home mode with the home Wi-Fi | `trmnl-x-<id>.local` opens on PC and iPhone; on Android use the IP |
 | Android and iPhone captive pop-up | opens the page (iOS pop-up may block cookies: then open it in Safari via `http://4.3.2.1`) |
 | Heap while serving a 100-file zip | no reset; serial log shows no allocation errors |
 
@@ -574,7 +577,7 @@ Needs an app that calls `webshare_start` and shows `status.code`. Take a phone a
 | Menu > Apps with no app in /apps | the entry "Install via Wi-Fi" is there (it used to hide the whole Apps item) |
 | Choose it with the home Wi-Fi on | screen: "Install apps via Wi-Fi", "Online at http://<ip>/", "Code: nnnnnn", a QR on the right, "Long press to stop" |
 | Scan the QR with a phone on the same Wi-Fi | the page opens already logged in and lists /apps; scanning the same QR a second time asks for the code |
-| Choose it with the router off | text asks to join "Writer" and open http://4.3.2.1/ |
+| Choose it with the router off | text asks to join the device's network and open http://4.3.2.1/ |
 | Upload hello.elf | "installed"; Apps menu lists it; it starts |
 | Upload a text file renamed to .elf, a truncated hello.elf, a file named x.bin | refused with the checker's reason / name refused; /apps unchanged |
 | Upload a changed hello.elf over the old | page says "older version kept"; after the new one ran 5 s the note is gone (file gone in flash) |

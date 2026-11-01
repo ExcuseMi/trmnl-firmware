@@ -29,6 +29,7 @@
 
 #include "fireworks.h"
 #include "fonts.h"
+#include "menu_apps.h"
 #include "messages.h"
 
 #define MENU_TIMEOUT_MS       15000
@@ -519,6 +520,11 @@ static void receive_apps(void) {
   app_count = apps_list(app_names, app_paths, APPS_MAX);
 }
 
+// The Apps flows' screens (menu_apps.h) run on this menu's list screen
+static int apps_choose(const char *const *labels, int count, const char *const *body, int body_count, int selected) {
+  return run_menu_screen(labels, count, true, body, body_count, MENU_TIMEOUT_MS, selected);
+}
+
 // Runs the menu screens until one ends the menu. Sets *function for MENU_OUTCOME_SPECIAL_FUNCTION,
 // app_chosen for MENU_OUTCOME_APP.
 static menu_outcome_t run_menu_screens(SPECIAL_FUNCTION *function) {
@@ -567,17 +573,11 @@ static menu_outcome_t run_menu_screens(SPECIAL_FUNCTION *function) {
       break;
     }
     case MENU_SCREEN_APPS: {
-      const char *labels[APPS_MAX + 4];
-      for (int i = 0; i < app_count; i++) {
-        labels[i] = app_names[i];
-      }
-      int n = app_count;
-      labels[n++] = "Receive over USB...";
-      const int install_item = n;
-      labels[n++] = "Install via Wi-Fi";
+      static app_meta_t metas[APPS_MAX];
+      const char *labels[6] = {"Open an app", "Receive over USB", "Install via Wi-Fi", "Remove an app"};
+      int n = 4, forget_item = -1;
       ble_pair_peer_t bond;
       static char forget[48];
-      int forget_item = -1;
       if (ble_keyboard_bond(&bond)) { // only while a Bluetooth keyboard is paired
         snprintf(forget, sizeof(forget), "Forget %s", bond.name[0] ? bond.name : "the Bluetooth keyboard");
         forget_item = n;
@@ -586,12 +586,12 @@ static menu_outcome_t run_menu_screens(SPECIAL_FUNCTION *function) {
       labels[n++] = "Back";
       int item = run_menu_screen(labels, n, true);
       if (item < 0) return MENU_OUTCOME_CLOSE;
-      if (item == install_item) return MENU_OUTCOME_INSTALL;
+      if (item == 2) return MENU_OUTCOME_INSTALL;
       if (item == n - 1) { // Back
         screen = MENU_SCREEN_MAIN;
         break;
       }
-      if (item == app_count) {
+      if (item == 1) {
         receive_apps();
         break; // the Apps submenu again, with what came
       }
@@ -599,7 +599,13 @@ static menu_outcome_t run_menu_screens(SPECIAL_FUNCTION *function) {
         ble_keyboard_forget(); // the next app that wants it shows the pairing screen
         break;
       }
-      app_chosen = item;
+      menu_apps_load(metas, app_names, app_count);
+      const int picked = item == 0 ? menu_apps_open(*menu_controls, metas, app_names, app_count)
+                                   : menu_apps_remove(*menu_controls, apps_choose, metas, app_names, app_count);
+      if (picked == MENU_APPS_TIMEOUT) return MENU_OUTCOME_CLOSE;
+      if (item == 3) app_count = apps_list(app_names, app_paths, APPS_MAX); // after a removal
+      if (picked < 0) break; // Back: the Apps submenu again
+      app_chosen = picked;
       return MENU_OUTCOME_APP;
     }
     case MENU_SCREEN_SPECIAL: {

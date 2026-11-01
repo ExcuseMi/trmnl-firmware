@@ -6,8 +6,6 @@
     "upload_margin_bytes": 16384
   },
   "wifi_page": {
-    "ap_ssid": "Writer",
-    "host_name": "writer",
     "page_title": "Writer files",
     "idle_s": 900,
     "fails_per_lock": 5,
