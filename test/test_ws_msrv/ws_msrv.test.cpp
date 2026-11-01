@@ -123,6 +123,7 @@ void setUp() {}
 void tearDown() {}
 
 #include "page_tests.h"
+#include "portal_tests.h"
 
 int main() {
   UNITY_BEGIN();
@@ -133,5 +134,6 @@ int main() {
   RUN_TEST(test_send_fails_mid_download_closes_the_file);
   RUN_TEST(test_refusals_before_any_handler);
   run_page_tests();
+  run_portal_tests();
   return UNITY_END();
 }

@@ -17,10 +17,7 @@ static asf_form_t *form_copy(void) {
   return f;
 }
 
-static void handle_settings_get(WsRequest &r) {
-  if (!ws_page_authorized(r, false)) return ws_send_error(r, 401, "type the code first");
-  asf_form_t *form = form_copy();
-  if (!form) return ws_send_error(r, 500, "no memory");
+void ws_settings_send_form(WsRequest &r, const asf_form_t *form, const ws_kv_t *kv) {
   JsonDocument d;
   JsonArray a = d["fields"].to<JsonArray>();
   for (int i = 0; i < form->n; i++) {
@@ -37,21 +34,17 @@ static void handle_settings_get(WsRequest &r) {
       for (int k = 0; asf_choice(f, k, one, sizeof(one)); k++) c.add(one);
     }
     char stored[ASF_VALUE_MAX + 1], shown[ASF_VALUE_MAX + 1];
-    int n = WP.env->setting_get(f->key, stored, ASF_VALUE_MAX);
+    int n = kv->get(kv->ctx, f->key, stored, ASF_VALUE_MAX);
     bool set = false;
     asf_shown(f, stored, n > 0 ? (size_t)n : 0, shown, sizeof(shown), &set); // a secret: "" always
     if (f->kind != APP_SETTING_SECRET) o["v"] = shown;
     o["set"] = set;
   }
-  ws_send_doc(r, 200, d); // before the free: ArduinoJson keeps the keys and labels as pointers into the form
-  WP.env->big_free(form);
+  ws_send_doc(r, 200, d); // before the caller frees: ArduinoJson keeps the keys and labels as pointers into the form
 }
 
 // Every value checked first, then written: one bad value writes nothing
-static void handle_settings_set(WsRequest &r) {
-  if (!ws_page_authorized(r, true)) return ws_send_error(r, 401, "type the code first");
-  asf_form_t *form = form_copy();
-  if (!form) return ws_send_error(r, 500, "no memory");
+bool ws_settings_apply(WsRequest &r, const asf_form_t *form, const ws_kv_t *kv, int *changed_out) {
   char why[ASF_WHY_MAX], msg[ASF_LABEL_MAX + ASF_WHY_MAX + 4], key[ASF_KEY_MAX + 3], v[ASF_VALUE_MAX + 2];
   for (int i = 0; i < form->n; i++) {
     const asf_field_t *f = &form->f[i];
@@ -59,8 +52,8 @@ static void handle_settings_set(WsRequest &r) {
     if (!r.param(key, true, v, sizeof(v))) continue; // not sent: unchanged (an empty secret field)
     if (asf_check(f, v, strlen(v), why, sizeof(why)) != 0) {
       snprintf(msg, sizeof(msg), "%s: %s", f->label, why);
-      WP.env->big_free(form);
-      return ws_send_error(r, 400, msg);
+      ws_send_error(r, 400, msg);
+      return false;
     }
   }
   int changed = 0, failed = 0;
@@ -70,17 +63,46 @@ static void handle_settings_set(WsRequest &r) {
     if (!r.param(key, true, v, sizeof(v))) continue;
     size_t vlen = strlen(v);
     char stored[ASF_VALUE_MAX + 1];
-    int n = WP.env->setting_get(f->key, stored, ASF_VALUE_MAX);
+    int n = kv->get(kv->ctx, f->key, stored, ASF_VALUE_MAX);
     if (n < 0) n = 0;
     if ((size_t)n == vlen && !memcmp(stored, v, vlen)) continue;
-    int rc = vlen ? WP.env->setting_set(f->key, v, vlen) : WP.env->setting_remove(f->key);
+    int rc = vlen ? kv->set(kv->ctx, f->key, v, vlen) : kv->remove(kv->ctx, f->key);
     if (rc == 0) changed++;
     else failed++;
   }
+  *changed_out = changed;
+  if (failed) {
+    if (changed) WP.env->log("webshare: settings: %d changed, %d failed", changed, failed);
+    ws_send_error(r, 500, "could not save every value (flash full?)");
+    return false;
+  }
+  return true;
+}
+
+// The running app's store (setting_get/set of the app)
+static int run_get(void *, const char *k, char *b, size_t n) { return WP.env->setting_get(k, b, n); }
+static int run_set(void *, const char *k, const char *v, size_t n) { return WP.env->setting_set(k, v, n); }
+static int run_remove(void *, const char *k) { return WP.env->setting_remove(k); }
+static const ws_kv_t RUNNING = {nullptr, run_get, run_set, run_remove};
+
+static void handle_settings_get(WsRequest &r) {
+  if (!ws_page_authorized(r, false)) return ws_send_error(r, 401, "type the code first");
+  asf_form_t *form = form_copy();
+  if (!form) return ws_send_error(r, 500, "no memory");
+  ws_settings_send_form(r, form, &RUNNING);
   WP.env->big_free(form);
-  WP.env->log("webshare: settings saved, %d changed, %d failed", changed, failed);
+}
+
+static void handle_settings_set(WsRequest &r) {
+  if (!ws_page_authorized(r, true)) return ws_send_error(r, 401, "type the code first");
+  asf_form_t *form = form_copy();
+  if (!form) return ws_send_error(r, 500, "no memory");
+  int changed = 0;
+  bool ok = ws_settings_apply(r, form, &RUNNING, &changed);
+  WP.env->big_free(form);
   if (changed) WP.env->settings_changed(changed);
-  if (failed) return ws_send_error(r, 500, "could not save every value (flash full?)");
+  if (!ok) return; // the answer is sent
+  WP.env->log("webshare: settings saved, %d changed", changed);
   JsonDocument d;
   d["ok"] = true;
   d["changed"] = changed;

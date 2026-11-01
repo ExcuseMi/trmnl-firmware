@@ -185,7 +185,7 @@ static const ws_route_t COMMON[] = {
     {WS_POST, "/api/kbd", handle_kbd_set, nullptr, nullptr},
 };
 #define COMMON_N ((int)(sizeof(COMMON) / sizeof(COMMON[0])))
-static ws_route_t routes[COMMON_N + 12];
+static ws_route_t routes[COMMON_N + 24];
 static int routes_n;
 
 int ws_page_routes(const ws_route_t **out) {
@@ -220,6 +220,11 @@ void ws_page_start(int profile, bool ap, const ws_env_t *env, const ws_fs_t *fs_
   routes_n = 0;
   for (int i = 0; i < COMMON_N; i++) routes[routes_n++] = COMMON[i];
   for (int i = 0; i < pn && routes_n < (int)(sizeof(routes) / sizeof(routes[0])); i++) routes[routes_n++] = p[i];
+  if (profile == WS_PROFILE_INSTALL && env->portal) { // the X's page: apps, devices, this X
+    for (int i = 0; i < WS_ROUTES_PORTAL_N && routes_n < (int)(sizeof(routes) / sizeof(routes[0])); i++) {
+      routes[routes_n++] = WS_ROUTES_PORTAL[i];
+    }
+  }
 }
 
 void ws_page_drop_upload(void) {

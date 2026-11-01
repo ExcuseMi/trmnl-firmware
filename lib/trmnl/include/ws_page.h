@@ -9,6 +9,7 @@
 #include "webshare_files.h"
 #include "webshare_store.h"
 #include "ws_http.h"
+#include "ws_portal.h"
 
 // The Wi-Fi page's handlers, the same for each transport (ws_http.h): login, the one-time QR link, the keyboard
 // layout, and the routes of the four profiles (writer, apps, files, settings). What only the device has (pages,
@@ -42,6 +43,8 @@ typedef struct {
   size_t (*big_largest)(void);
   bool (*note_get)(char *out, size_t cap);
   void (*note_remove)(void);
+  // the X's page in the apps profile (ws_portal.h); nullptr: the apps list only
+  const ws_portal_env_t *portal;
 } ws_env_t;
 
 typedef struct {
@@ -95,5 +98,19 @@ void ws_feed_upload(WsRequest &r, const char *name, const uint8_t *data, size_t 
                     bool last, bool exact);
 void ws_handle_touch(WsRequest &r);
 
+// A settings store for the form handlers: the running app's, or another app's by name (the X's page)
+typedef struct {
+  void *ctx;
+  int (*get)(void *ctx, const char *key, char *buf, size_t cap);
+  int (*set)(void *ctx, const char *key, const char *v, size_t len);
+  int (*remove)(void *ctx, const char *key);
+} ws_kv_t;
+// The form with what the store holds ({"fields":[...]}, a secret only as "set")
+void ws_settings_send_form(WsRequest &r, const asf_form_t *form, const ws_kv_t *kv);
+// The posted v_<key> values: all checked, then written. true: *changed written; false: the error answer is sent
+bool ws_settings_apply(WsRequest &r, const asf_form_t *form, const ws_kv_t *kv, int *changed);
+
+extern const ws_route_t WS_ROUTES_PORTAL[];
+extern const int WS_ROUTES_PORTAL_N;
 extern const ws_route_t WS_ROUTES_WRITER[], WS_ROUTES_INSTALL[], WS_ROUTES_FILES[], WS_ROUTES_SETTINGS[];
 extern const int WS_ROUTES_WRITER_N, WS_ROUTES_INSTALL_N, WS_ROUTES_FILES_N, WS_ROUTES_SETTINGS_N;
