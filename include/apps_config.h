@@ -34,6 +34,7 @@
 #define USB_PORT_CLEAR_MS 1000u // usb_keyboard.clear_ms
 #define USB_PORT_PROBE_MS 3000u // usb_keyboard.probe_ms
 #define USB_PORT_RETRY_MS 10000u // usb_keyboard.retry_ms
+#define USB_PORT_OUTSIDE_PROBE_MS 5000u // usb_keyboard.outside_probe_ms
 // event_log
 #define EVLOG_BYTES 8192u // event_log.bytes
 #define EVLOG_FLUSH_GAP_MS 15000u // event_log.flush_gap_ms

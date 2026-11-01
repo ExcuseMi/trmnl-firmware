@@ -35,10 +35,17 @@ const char *usb_role_str(usb_role_t role);
 // Host mode starts as a probe: without a keyboard after USB_PORT_PROBE_MS it is left and tried again after
 // USB_PORT_RETRY_MS. It is left in the same step on input power (or an unreadable charger), on the keyboard's
 // removal, or when the app no longer wants keys. A restart starts in device mode (usb_port_init).
+//
+// Outside power (a powered hub or a Y/OTG adapter with power in feeds VBUS, or a computer): the boost never goes on
+// (never 5 V against an outside supply). An app that wants USB host gets one try with the boost OFF after
+// USB_PORT_CLEAR_MS of outside power: host mode while a device is there; none within USB_PORT_OUTSIDE_PROBE_MS (a
+// computer) or the device removed: device mode (serial, flashing) and no new try until the outside power goes away or
+// the app asks again. `boost` says which host mode it is.
 
 #define USB_PORT_POLL_MS  100
 // config/apps.json: USB_PORT_CLEAR_MS no input power this long before the boost may go on, USB_PORT_PROBE_MS host
-// mode without a keyboard: back to device mode, USB_PORT_RETRY_MS then this long in device mode before the next probe
+// mode without a keyboard: back to device mode, USB_PORT_RETRY_MS then this long in device mode before the next probe,
+// USB_PORT_OUTSIDE_PROBE_MS host mode with outside power without a device: back to serial
 #include <apps_config.h>
 
 typedef enum { USB_POWER_NO, USB_POWER_YES, USB_POWER_UNKNOWN } usb_power_t;
@@ -54,6 +61,9 @@ typedef enum {
   USB_WHY_KEYBOARD, // host mode, a keyboard is there
   USB_WHY_NO_KEYBOARD, // the probe found none, or it was removed: waiting USB_PORT_RETRY_MS
   USB_WHY_PORT_TAKEN, // another role (the USB drive) has the PHY
+  USB_WHY_OUTSIDE_PROBING, // host mode, boost off, outside power: waiting for a device (a hub's or an adapter's)
+  USB_WHY_OUTSIDE_DEVICE, // host mode, boost off, outside power: a device is there
+  USB_WHY_OUTSIDE_NONE, // the outside power try found none or the device left: serial until the power goes away
 } usb_port_why_t;
 
 typedef struct {
@@ -64,18 +74,23 @@ typedef struct {
   uint32_t host_since; // when host mode began
   uint32_t retry_at; // device mode until then after a probe without a keyboard
   bool retry_wait;
+  bool boost; // host mode with the X's boost on; false: host mode on outside power (or device mode)
+  bool powered; // outside power (or unreadable) since powered_since
+  uint32_t powered_since;
+  bool outside_tried; // the one try on this outside power is used
 } usb_port_t;
 
 typedef struct {
   bool wanted; // an app asked for USB keys
   usb_power_t power; // the charger's input power good
-  bool keyboard; // a HID keyboard is enumerated (host mode only)
+  bool keyboard; // a HID keyboard (or the wanted pen tablet) is enumerated (host mode only)
   bool port_taken; // the PHY is in another role than serial or host (the USB drive shows)
 } usb_port_input_t;
 
 void usb_port_init(usb_port_t *p);
 
-// One poll at `now_ms`; returns the mode the port must be in now. Host mode means: boost on, PHY to USB-OTG.
+// One poll at `now_ms`; returns the mode the port must be in now. Host mode means: PHY to USB-OTG, the boost on only
+// when `p->boost`.
 usb_port_mode_t usb_port_step(usb_port_t *p, uint32_t now_ms, const usb_port_input_t *in);
 
 const char *usb_port_why_str(usb_port_why_t why);

@@ -32,7 +32,8 @@
   "usb_keyboard": {
     "clear_ms": 1000,
     "probe_ms": 3000,
-    "retry_ms": 10000
+    "retry_ms": 10000,
+    "outside_probe_ms": 5000
   },
   "event_log": {
     "bytes": 8192,

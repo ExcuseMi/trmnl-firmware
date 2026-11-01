@@ -35,15 +35,52 @@ void usb_port_init(usb_port_t *p) {
 static usb_port_mode_t device(usb_port_t *p, usb_port_why_t why) {
   p->mode = USB_PORT_DEVICE;
   p->why = why;
+  p->boost = false;
   return p->mode;
 }
 
-usb_port_mode_t usb_port_step(usb_port_t *p, uint32_t now, const usb_port_input_t *in) {
-  if (in->power != USB_POWER_NO) {
-    p->clear = false;
-    p->retry_wait = false; // the next time on battery is a new chance
-    return device(p, in->power == USB_POWER_YES ? USB_WHY_INPUT_POWER : USB_WHY_POWER_UNKNOWN);
+static usb_port_mode_t host(usb_port_t *p, uint32_t now, bool boost, usb_port_why_t why) {
+  p->mode = USB_PORT_HOST;
+  p->boost = boost;
+  p->why = why;
+  p->host_since = now;
+  return p->mode;
+}
+
+// Outside power (or an unreadable charger): never the boost; one host try with it off per outside power and app ask
+static usb_port_mode_t step_powered(usb_port_t *p, uint32_t now, const usb_port_input_t *in) {
+  usb_port_why_t why = in->power == USB_POWER_YES ? USB_WHY_INPUT_POWER : USB_WHY_POWER_UNKNOWN;
+  p->clear = false;
+  p->retry_wait = false; // the next time on battery is a new chance
+  if (!p->powered) {
+    p->powered = true;
+    p->powered_since = now;
   }
+  if (!in->wanted) {
+    p->outside_tried = false; // the app's next ask is a new try
+    return device(p, why);
+  }
+  if (in->port_taken) return device(p, why);
+  if (p->mode == USB_PORT_HOST && !p->boost) {
+    if (in->keyboard) {
+      p->why = USB_WHY_OUTSIDE_DEVICE;
+      return p->mode;
+    }
+    if (p->why == USB_WHY_OUTSIDE_DEVICE || (uint32_t)(now - p->host_since) >= USB_PORT_OUTSIDE_PROBE_MS)
+      return device(p, USB_WHY_OUTSIDE_NONE); // a computer, or the device left: serial again
+    return p->mode;
+  }
+  if (p->mode == USB_PORT_HOST) return device(p, why); // the boost is on: off in this step, never against outside 5 V
+  if (p->outside_tried) return device(p, USB_WHY_OUTSIDE_NONE);
+  if ((uint32_t)(now - p->powered_since) < USB_PORT_CLEAR_MS) return device(p, why);
+  p->outside_tried = true;
+  return host(p, now, false, USB_WHY_OUTSIDE_PROBING);
+}
+
+usb_port_mode_t usb_port_step(usb_port_t *p, uint32_t now, const usb_port_input_t *in) {
+  if (in->power != USB_POWER_NO) return step_powered(p, now, in);
+  p->powered = false;
+  p->outside_tried = false; // the outside power went away: the next one is a new try
   if (!p->clear) {
     p->clear = true;
     p->clear_since = now;
@@ -53,6 +90,7 @@ usb_port_mode_t usb_port_step(usb_port_t *p, uint32_t now, const usb_port_input_
     return device(p, USB_WHY_NOT_WANTED);
   }
   if (in->port_taken) return device(p, USB_WHY_PORT_TAKEN); // never pull the PHY from the drive
+  if (p->mode == USB_PORT_HOST && !p->boost) return device(p, USB_WHY_WAIT_CLEAR); // outside power gone: boost later
   if (p->mode == USB_PORT_HOST) {
     if (in->keyboard) {
       p->why = USB_WHY_KEYBOARD;
@@ -69,10 +107,7 @@ usb_port_mode_t usb_port_step(usb_port_t *p, uint32_t now, const usb_port_input_
   if ((uint32_t)(now - p->clear_since) < USB_PORT_CLEAR_MS) return device(p, USB_WHY_WAIT_CLEAR);
   if (p->retry_wait && (int32_t)(now - p->retry_at) < 0) return device(p, USB_WHY_NO_KEYBOARD);
   p->retry_wait = false;
-  p->mode = USB_PORT_HOST;
-  p->why = USB_WHY_PROBING;
-  p->host_since = now;
-  return p->mode;
+  return host(p, now, true, USB_WHY_PROBING);
 }
 
 const char *usb_port_why_str(usb_port_why_t why) {
@@ -85,6 +120,9 @@ const char *usb_port_why_str(usb_port_why_t why) {
   case USB_WHY_KEYBOARD: return "host mode: keyboard";
   case USB_WHY_NO_KEYBOARD: return "no keyboard: device mode, trying again later";
   case USB_WHY_PORT_TAKEN: return "the USB drive has the port";
+  case USB_WHY_OUTSIDE_PROBING: return "host with outside power (boost off): looking for a device";
+  case USB_WHY_OUTSIDE_DEVICE: return "host with outside power (boost off): device";
+  case USB_WHY_OUTSIDE_NONE: return "no device, back to serial (until the outside power goes away)";
   }
   return "?";
 }

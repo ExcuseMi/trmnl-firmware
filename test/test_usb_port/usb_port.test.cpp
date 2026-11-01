@@ -37,17 +37,106 @@ void test_starts_and_stays_in_device_mode_without_an_app() {
   TEST_ASSERT_EQUAL(USB_WHY_NOT_WANTED, p.why);
 }
 
-void test_never_host_while_powered_or_unreadable() {
-  TEST_ASSERT_EQUAL(-1, host_after(60000, true, USB_POWER_YES, false));
+// Polls `ms`; true if the boost was ever asked for (host mode with p.boost)
+static bool boost_ever(uint32_t ms, bool wanted, usb_power_t power, bool keyboard) {
+  bool any = false;
+  for (uint32_t t = 0; t <= ms; t += USB_PORT_POLL_MS) {
+    usb_port_input_t in = {wanted, power, keyboard};
+    if (usb_port_step(&p, now, &in) == USB_PORT_HOST && p.boost) any = true;
+    now += USB_PORT_POLL_MS;
+  }
+  return any;
+}
+
+void test_never_boost_while_powered_or_unreadable() {
+  TEST_ASSERT_FALSE(boost_ever(60000, true, USB_POWER_YES, false));
+  TEST_ASSERT_FALSE(boost_ever(60000, true, USB_POWER_YES, true));
+  usb_port_init(&p);
+  TEST_ASSERT_FALSE(boost_ever(60000, true, USB_POWER_UNKNOWN, false));
+  TEST_ASSERT_FALSE(boost_ever(60000, true, USB_POWER_UNKNOWN, true));
+}
+
+void test_never_host_while_powered_without_an_app() {
+  TEST_ASSERT_EQUAL(-1, host_after(60000, false, USB_POWER_YES, true));
   TEST_ASSERT_EQUAL(USB_WHY_INPUT_POWER, p.why);
-  TEST_ASSERT_EQUAL(-1, host_after(60000, true, USB_POWER_UNKNOWN, false));
+  TEST_ASSERT_EQUAL(-1, host_after(60000, false, USB_POWER_UNKNOWN, true));
   TEST_ASSERT_EQUAL(USB_WHY_POWER_UNKNOWN, p.why);
+}
+
+// ---- outside power: a powered hub or a Y/OTG adapter feeds VBUS (2026-11-01, pen tablet power test) ----
+
+void test_outside_power_host_with_the_boost_off_after_the_clear_time() {
+  TEST_ASSERT_EQUAL(USB_PORT_CLEAR_MS, host_after(5000, true, USB_POWER_YES, false));
+  TEST_ASSERT_FALSE(p.boost);
+  TEST_ASSERT_EQUAL(USB_WHY_OUTSIDE_PROBING, p.why);
+  usb_port_init(&p);
+  TEST_ASSERT_EQUAL(USB_PORT_CLEAR_MS, host_after(5000, true, USB_POWER_UNKNOWN, false)); // a hub may read so
+  TEST_ASSERT_FALSE(p.boost);
+}
+
+void test_outside_power_device_keeps_host_mode() {
+  run(USB_PORT_CLEAR_MS, true, USB_POWER_YES, false);
+  TEST_ASSERT_EQUAL(USB_PORT_HOST, run(60000, true, USB_POWER_YES, true));
+  TEST_ASSERT_EQUAL(USB_WHY_OUTSIDE_DEVICE, p.why);
+  TEST_ASSERT_FALSE(p.boost);
+}
+
+void test_outside_power_without_a_device_back_to_serial_and_no_new_try() {
+  run(USB_PORT_CLEAR_MS, true, USB_POWER_YES, false);
+  TEST_ASSERT_EQUAL(USB_PORT_HOST, p.mode);
+  TEST_ASSERT_EQUAL(USB_PORT_HOST, run(USB_PORT_OUTSIDE_PROBE_MS - USB_PORT_POLL_MS, true, USB_POWER_YES, false));
+  TEST_ASSERT_EQUAL(USB_PORT_DEVICE, run(USB_PORT_POLL_MS, true, USB_POWER_YES, false)); // a computer: bounded
+  TEST_ASSERT_EQUAL(USB_WHY_OUTSIDE_NONE, p.why);
+  TEST_ASSERT_EQUAL(-1, host_after(600000, true, USB_POWER_YES, false)); // flashing and the log keep working
+}
+
+void test_outside_device_removed_back_to_serial_at_once() {
+  run(USB_PORT_CLEAR_MS + USB_PORT_POLL_MS, true, USB_POWER_YES, true); // host, then the device seen
+  TEST_ASSERT_EQUAL(USB_WHY_OUTSIDE_DEVICE, p.why);
+  TEST_ASSERT_EQUAL(USB_PORT_HOST, p.mode);
+  now += USB_PORT_POLL_MS;
+  TEST_ASSERT_EQUAL(USB_PORT_DEVICE, run(0, true, USB_POWER_YES, false));
+  TEST_ASSERT_EQUAL(USB_WHY_OUTSIDE_NONE, p.why);
+  TEST_ASSERT_EQUAL(-1, host_after(60000, true, USB_POWER_YES, false));
+}
+
+void test_outside_try_again_after_the_power_goes_or_the_app_asks_again() {
+  run(USB_PORT_CLEAR_MS + USB_PORT_OUTSIDE_PROBE_MS, true, USB_POWER_YES, false);
+  TEST_ASSERT_EQUAL(USB_WHY_OUTSIDE_NONE, p.why);
+  run(0, false, USB_POWER_YES, false); // the app ends; a new app asks (powered long enough already)
+  now += USB_PORT_POLL_MS;
+  TEST_ASSERT_EQUAL(0, host_after(5000, true, USB_POWER_YES, false));
+  run(USB_PORT_OUTSIDE_PROBE_MS, true, USB_POWER_YES, false);
+  TEST_ASSERT_EQUAL(USB_PORT_DEVICE, p.mode);
+  run(0, true, USB_POWER_NO, false); // unplugged a moment
+  now += USB_PORT_POLL_MS;
+  TEST_ASSERT_EQUAL(USB_PORT_CLEAR_MS, host_after(5000, true, USB_POWER_YES, false));
+  TEST_ASSERT_FALSE(p.boost);
+}
+
+void test_outside_power_gone_in_host_mode_leaves_it_then_boosts_after_the_clear_time() {
+  run(USB_PORT_CLEAR_MS, true, USB_POWER_YES, true);
+  TEST_ASSERT_EQUAL(USB_PORT_HOST, p.mode);
+  now += USB_PORT_POLL_MS;
+  TEST_ASSERT_EQUAL(USB_PORT_DEVICE, run(0, true, USB_POWER_NO, true)); // the boost-off host session ends
+  TEST_ASSERT_EQUAL(USB_WHY_WAIT_CLEAR, p.why);
+  now += USB_PORT_POLL_MS;
+  TEST_ASSERT_EQUAL(USB_PORT_CLEAR_MS - USB_PORT_POLL_MS, host_after(5000, true, USB_POWER_NO, true));
+  TEST_ASSERT_TRUE(p.boost);
+}
+
+void test_outside_power_while_the_drive_has_the_port_no_host() {
+  usb_port_input_t in = {true, USB_POWER_YES, false, true};
+  for (uint32_t t = 0; t < 30000; t += USB_PORT_POLL_MS, now += USB_PORT_POLL_MS) {
+    TEST_ASSERT_EQUAL(USB_PORT_DEVICE, usb_port_step(&p, now, &in));
+  }
 }
 
 void test_host_only_after_a_second_without_input_power() {
   int t = host_after(5000, true, USB_POWER_NO, false);
   TEST_ASSERT_EQUAL(USB_PORT_CLEAR_MS, t);
   TEST_ASSERT_EQUAL(USB_WHY_PROBING, p.why);
+  TEST_ASSERT_TRUE(p.boost);
 }
 
 void test_a_power_blip_restarts_the_second() {
@@ -87,13 +176,15 @@ void test_charger_plugged_in_while_host_gives_device_mode_at_once() {
   TEST_ASSERT_EQUAL(USB_PORT_HOST, p.mode);
   TEST_ASSERT_EQUAL(USB_PORT_DEVICE, run(0, true, USB_POWER_YES, true));
   TEST_ASSERT_EQUAL(USB_WHY_INPUT_POWER, p.why);
-  // and stays there while powered, even with the keyboard still reported
-  TEST_ASSERT_EQUAL(-1, host_after(30000, true, USB_POWER_YES, true));
+  TEST_ASSERT_FALSE(p.boost);
+  // and never the boost while powered, even with the keyboard still reported (only the boost-off try)
+  TEST_ASSERT_FALSE(boost_ever(30000, true, USB_POWER_YES, true));
 }
 
 void test_charger_unreadable_while_host_gives_device_mode_at_once() {
   run(1000, true, USB_POWER_NO, true);
   TEST_ASSERT_EQUAL(USB_PORT_DEVICE, run(0, true, USB_POWER_UNKNOWN, true));
+  TEST_ASSERT_FALSE(p.boost);
 }
 
 void test_app_exit_while_host_gives_device_mode_at_once() {
@@ -260,7 +351,15 @@ int main(int argc, char **argv) {
   RUN_TEST(test_a_long_refresh_keeps_host_mode);
   RUN_TEST(test_after_the_lock_a_charger_still_ends_host_mode);
   RUN_TEST(test_a_lock_held_for_good_reads_as_unknown);
-  RUN_TEST(test_never_host_while_powered_or_unreadable);
+  RUN_TEST(test_never_boost_while_powered_or_unreadable);
+  RUN_TEST(test_never_host_while_powered_without_an_app);
+  RUN_TEST(test_outside_power_host_with_the_boost_off_after_the_clear_time);
+  RUN_TEST(test_outside_power_device_keeps_host_mode);
+  RUN_TEST(test_outside_power_without_a_device_back_to_serial_and_no_new_try);
+  RUN_TEST(test_outside_device_removed_back_to_serial_at_once);
+  RUN_TEST(test_outside_try_again_after_the_power_goes_or_the_app_asks_again);
+  RUN_TEST(test_outside_power_gone_in_host_mode_leaves_it_then_boosts_after_the_clear_time);
+  RUN_TEST(test_outside_power_while_the_drive_has_the_port_no_host);
   RUN_TEST(test_host_only_after_a_second_without_input_power);
   RUN_TEST(test_a_power_blip_restarts_the_second);
   RUN_TEST(test_keyboard_keeps_host_mode);

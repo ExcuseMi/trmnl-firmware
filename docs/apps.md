@@ -165,7 +165,10 @@ Keyboard host mode (`usb_port_step`, applied by `src/usb_keyboard.cpp`): device 
 | Case | Port |
 |---|---|
 | no app asked for USB keys, or the app ended | device mode (the app's end waits for it) |
-| a charger or computer powers the port (charger PG, IOX pin 0), or PG unreadable | device mode, in the same 100 ms poll |
+| a charger or computer powers the port (charger PG, IOX pin 0), or PG unreadable | device mode, in the same 100 ms poll; the boost never goes on |
+| outside power (powered hub, Y/OTG adapter with power in, or a computer) for 1 s, app wants USB host | one try: host mode with the boost OFF ("host with outside power"); no device within 5 s, or it is removed: device mode ("no device, back to serial"), no new try until the outside power goes away or the app asks again |
+| external USB hub | IDF hub driver on (`CONFIG_USB_HOST_HUBS_SUPPORTED`): event log `USB hub ... N ports` |
+| any device enumerates | event log `USB dev VID:PID class .. on hub port ..: N mA asked, boost on/off, outside power yes/no/unknown` |
 | a panel refresh holds the expander (PG not readable then) | the last reading stays, host mode too; read again after the refresh. Unreadable only after 30 s (a hang) |
 | on battery for 1 s, app wants USB keys | host mode: 5 V boost on (IOX pin 1), USB host + `espressif/usb_host_hid` (boot keyboard) |
 | host mode, no keyboard within 3 s / keyboard removed | device mode, next probe after 10 s |
@@ -283,6 +286,7 @@ header is stale, a key is missing, or one of these values (or a `#define` of its
 | `usb_keyboard.clear_ms` | `USB_PORT_CLEAR_MS` | 1000 | no input power this long before host mode |
 | `usb_keyboard.probe_ms` | `USB_PORT_PROBE_MS` | 3000 | host mode without a keyboard this long: back to device mode |
 | `usb_keyboard.retry_ms` | `USB_PORT_RETRY_MS` | 10000 | then this long before the next probe |
+| `usb_keyboard.outside_probe_ms` | `USB_PORT_OUTSIDE_PROBE_MS` | 5000 | host mode on outside power (boost off) without a device this long: back to serial |
 | `event_log.bytes` | `EVLOG_BYTES` | 8192 | the event log's file and RAM (1 to 64 KB) |
 | `event_log.flush_gap_ms` | `EVLOG_FLUSH_GAP_MS` | 15000 | at most one event log write this often |
 
