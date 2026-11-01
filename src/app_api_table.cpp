@@ -425,6 +425,13 @@ static bool net_up(void) { return net_up_on(true) != NET_PATH_NONE; }
 
 bool app_host_net_up(void) { return net_up_on(false) == NET_PATH_S3; }
 
+bool app_host_net_up_modem(void) {
+  if (WiFi.status() == WL_CONNECTED || !WifiCaptivePortal.isSaved() || !WifiCaptivePortal.getLastCredentials().is5GHz) {
+    return false; // the S3's own path, or nothing the modem could join
+  }
+  return net_up_on(true) == NET_PATH_MODEM;
+}
+
 // http_open_error.h keeps the codes it classifies without the IDF headers (native tests)
 static_assert(HTTP_OPEN_ESP_ERR_NO_MEM == ESP_ERR_NO_MEM, "ESP_ERR_NO_MEM");
 static_assert(HTTP_OPEN_MBEDTLS_ERR_SSL_ALLOC_FAILED == MBEDTLS_ERR_SSL_ALLOC_FAILED, "SSL");

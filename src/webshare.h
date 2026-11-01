@@ -10,6 +10,8 @@ void webshare_stop(void); // safe when not running, from any task except the pag
 int webshare_start_files(app_webshare_mode_t mode, const app_webshare_files_t *files); // API 2.3, webshare_files.cpp
 int webshare_start_settings(app_webshare_mode_t mode); // API 2.6, webshare_settings.cpp: the app's settings form
 int webshare_status(app_webshare_status_t *st);
+// The Wi-Fi page's modem server holds the modem's UART (a saved 5 GHz network): other modem users wait or refuse
+bool webshare_modem_owns_uart(void);
 
 // The apps profile for the menu's "Install via Wi-Fi" (webshare_install.cpp): the same server and login, listing and
 // accepting the ELF files in /apps instead of an app's documents. Joins the saved network or falls back to the access

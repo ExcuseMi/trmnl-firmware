@@ -4,7 +4,8 @@
 #include <stdint.h>
 
 // Splits what the ESP32-C5 modem (ESP-AT) sends during a TCP/SSL link into lines ("OK", "SEND OK", "CLOSED",
-// ...), the ">" prompt of AT+CIPSEND and the payload of "+IPD,<len>:<data>" frames (AT+CIPDINFO=0, active receive).
+// ...), the ">" prompt of AT+CIPSEND and the payload of "+IPD,<len>:<data>" frames (AT+CIPDINFO=0, active receive),
+// or "+IPD,<link>,<len>:<data>" with several links (AT+CIPMUX=1: the Wi-Fi page's server, `link` tells whose).
 // A frame may arrive at any point, also between a command and its answer. Pure: lib/trmnl_x/src/modem_tcp.cpp feeds it.
 
 #define MODEM_AT_LINE_MAX 128 // longer lines are cut (kept: the first 127 characters)
@@ -20,6 +21,7 @@ typedef struct {
   char line[MODEM_AT_LINE_MAX];
   size_t line_len;
   uint32_t payload_left; // > 0: inside a +IPD frame
+  int link; // the frame's link id, -1 without one (AT+CIPMUX=0)
   int bad_frames; // "+IPD," with no valid length (counted, the line is then passed as a line)
 } modem_at_rx_t;
 

@@ -12,6 +12,7 @@
 
 void Modem::tcpOnLine(void *ctx, const char *line) {
   Modem *m = (Modem *)ctx;
+  if (m->_srvEvent || m->_capPrefix) m->serverLine(line);
   size_t n = strlen(line);
   if (strcmp(line, "CLOSED") == 0 || (n > 7 && strcmp(line + n - 7, ",CLOSED") == 0)) m->_closed = true;
   if (m->_hit >= 0) return;
@@ -27,7 +28,8 @@ void Modem::tcpOnPrompt(void *ctx) { ((Modem *)ctx)->_prompt = true; }
 
 void Modem::tcpOnPayload(void *ctx, const uint8_t *data, size_t len) {
   Modem *m = (Modem *)ctx;
-  if (m->_sink) m->_sink(m->_sinkCtx, data, len);
+  if (m->_srvData) m->_srvData(m->_srvCtx, m->_rx.link, data, len);
+  else if (m->_sink) m->_sink(m->_sinkCtx, data, len);
 }
 
 // Feeds what the UART holds through the framing; returns the bytes read

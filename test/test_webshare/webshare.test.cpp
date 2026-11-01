@@ -211,16 +211,21 @@ void test_token_guesses_lock_like_wrong_codes() {
   TEST_ASSERT_EQUAL(WS_AUTH_LOCKED, ws_auth_token_login(&a, "000000010000000200000003abcdef01", 20, TR, sid));
 }
 
-// The firmware must never write the code, the token or the login link to the log: no Log_ line in
-// src/webshare.cpp may mention them (the file is read from the project root, where pio runs the tests)
+// The firmware must never write the code, the token or the login link to the log: no log line of the page's files
+// may mention them (the files are read from the project root, where pio runs the tests). The handlers log through
+// ws_env_t (->log, ->evlog), the firmware with Log_ and Serial.
 void test_firmware_never_logs_token_or_code() {
   int logs = 0;
-  for (const char *file : {"src/webshare.cpp", "src/webshare_install.cpp"}) {
+  for (const char *file :
+       {"src/webshare.cpp", "src/webshare_install.cpp", "src/webshare_async.cpp", "src/webshare_modem.cpp",
+        "src/webshare_env.cpp", "lib/trmnl/src/ws_page_core.cpp", "lib/trmnl/src/ws_page_writer.cpp",
+        "lib/trmnl/src/ws_page_apps.cpp", "lib/trmnl/src/ws_page_files.cpp", "lib/trmnl/src/ws_page_settings.cpp",
+        "lib/trmnl/src/ws_msrv.cpp", "lib/trmnl_x/src/modem_server.cpp"}) {
     FILE *f = fopen(file, "r");
     TEST_ASSERT_NOT_NULL_MESSAGE(f, file);
     char line[512];
     while (fgets(line, sizeof(line), f)) {
-      if (!strstr(line, "Log_") && !strstr(line, "Serial.")) continue;
+      if (!strstr(line, "Log_") && !strstr(line, "Serial.") && !strstr(line, "->log(") && !strstr(line, "->evlog(")) continue;
       logs++;
       for (const char *w : {"token", "login", "pin", "code", "auth", "cookie", "wsid", "S.url", "status", "st.url"}) {
         TEST_ASSERT_NULL_MESSAGE(strstr(line, w), line);

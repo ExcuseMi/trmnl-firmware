@@ -37,6 +37,8 @@ void app_host_close_files(void);
 
 // The same as net_up in the table (connects the saved 2.4 GHz network), for the Wi-Fi page
 bool app_host_net_up(void);
+// On a saved 5 GHz network: the ESP32-C5 modem joins it, for the Wi-Fi page's modem server (false otherwise)
+bool app_host_net_up_modem(void);
 
 // The app's settings (setting_get / setting_set in the table) for the Wi-Fi page's settings profile; remove deletes a
 // key (an empty text or secret)

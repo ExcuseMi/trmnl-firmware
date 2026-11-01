@@ -188,8 +188,9 @@ Keyboard host mode (`usb_port_step`, applied by `src/usb_keyboard.cpp`): device 
 From any phone browser, no app: list, download (one file or a zip), upload, rename and delete the app's
 `documents/<folder>/<title>.md|.txt`, and add `settings/fonts/*.ttf|.otf`. Anything else in the app folder
 (`settings/settings.json`, other names, hidden files) is never listed, read, written or removed. Logic in
-`lib/trmnl/src/webshare_*`, server in `src/webshare.cpp`, page in `src/webshare_page.h`, AP and probe URLs shared
-with the Wi-Fi setup portal in `lib/wificaptive/src/captive_ap.cpp`.
+`lib/trmnl/src/webshare_*`, the handlers of every profile in `lib/trmnl/src/ws_page_*` (one copy for both
+transports, `ws_http.h`), start and files in `src/webshare.cpp`, AsyncWebServer in `src/webshare_async.cpp`, page in
+`src/webshare_page.h`, AP and probe URLs shared with the Wi-Fi setup portal in `lib/wificaptive/src/captive_ap.cpp`.
 Names, limits and times below are the defaults of "Configuration".
 
 | Rule | How |
@@ -198,12 +199,30 @@ Names, limits and times below are the defaults of "Configuration".
 | Default (`APP_WEBSHARE_AUTO`) | the saved home network, so the phone stays on its Wi-Fi; only if none is reachable the access point. `status.mode` says which. `APP_WEBSHARE_HOME` alone does not fall back (`APP_ENONET`) |
 | One-time link | `status.url` ("Online at ...") and `status.login_url` (`/?t=<128-bit token>`, for a QR): one login, 15 min, gone at stop, a wrong token counts like a wrong code, never logged (test reads the source). Typing the code works too. Changed in place: API 2 is not released |
 | AP mode | open network named like the device ("TRMNL-X-BJRLAT": its Wi-Fi host name, `webshare_host.h`; with only the board prefix, the last 3 MAC bytes are added), `http://4.3.2.1`, phones open it as a captive portal |
-| Home network | saved 2.4 GHz network, `http://<device name lowercase>.local` (e.g. `trmnl-x-bjrlat.local`, mDNS) and the IP in `status.ip` |
+| Home network | saved 2.4 GHz network, `http://<device name lowercase>.local` (e.g. `trmnl-x-bjrlat.local`, mDNS, also on the modem path) and the IP in `status.ip`; a saved 5 GHz network through the modem ("Wi-Fi page on 5 GHz") |
 | Code | 6 digits in `status.code`, the app shows it on the X's screen; no API works without a session from `POST /api/login`; 5 wrong codes lock 60 s (doubling), 15 stop the page |
 | Changes | need the `X-Writer` header (another site's form cannot send it) and the session cookie (SameSite=Strict) |
 | No silent overwrite | upload to `.webshare.tmp` in the target folder, renamed when all announced bytes arrived and the file on disk has that size; same bytes: nothing written; other bytes: saved as `title (web N).md`, the old file untouched; rename onto an existing name is refused |
 | Limits | document 1 MB, font 4 MB, 32 KB of the file system stays free, one upload at a time, 30 s without data drops it, leftover temp files are removed at start |
 | Zip | stored, made while sending (no copy in memory), up to 128 documents; a read error cuts the connection |
+
+### Wi-Fi page on 5 GHz
+
+The S3's radio is 2.4 GHz only. On a saved 5 GHz network the ESP32-C5 modem runs the TCP server and the S3 speaks
+HTTP itself; the page, login and every profile are the same handlers as on AsyncWebServer. Nothing of this ran on a
+device yet.
+
+| What | Rule |
+|---|---|
+| when | `AUTO` or `HOME`, the S3 is not on a network, the saved one is 5 GHz (not enterprise) and the modem joins it (`app_host_net_up_modem`); else as before (2.4 GHz on the S3, or the access point) |
+| AT commands (ESP-AT v5.1, `data/system/factory_ESP32C5-4MB.bin`) | `AT+CIPSERVER=0,1` and `AT+CIPCLOSE` (leftovers), `AT+CIPMUX=1`, `AT+CIPSERVERMAXCONN=5`, `AT+CIPDINFO=0`, `AT+CIPSERVER=1,80`, `AT+CIPSTO=30`, `AT+CIPSTA?` (the IP); stop: `AT+MDNS=0`, `AT+CIPSERVER=0,1`, `AT+CIPMUX=0` (`lib/trmnl_x/src/modem_server.cpp`) |
+| receive | active mode, `+IPD,<link>,<len>:<data>` (`modem_at_rx.h` keeps the link id); the UART's RTS/CTS paces the modem when the S3 writes the file system, so passive mode (`AT+CIPRECVTYPE`, present in the firmware) is not needed |
+| links | 5 at once (link ids 0..4, more are closed at once); one request per connection, `Connection: close` on every answer; a request silent 20 s is cut, the modem drops a link idle 30 s; a closed link mid-upload drops the temporary file (`ws_msrv.h`, test `test_ws_msrv`) |
+| requests | `GET` / `POST`, request line 512 bytes (414), header lines over 1 KB skipped, 64 headers (431), body by `Content-Length` or chunked (a chunked upload: 411), form bodies up to 16 KB (413), `multipart/form-data` for `curl -F` (`ws_http_parse.h`, `ws_multipart.h`, test `test_ws_http`) |
+| answers | `AT+CIPSEND=<link>,<n>` pieces of 4 KB, one piece per link in turn; a file and the zip stream from the file system, never whole in RAM; a send that fails closes the link and the file |
+| uploads | written in 4 KB pieces as they arrive (several MB never sit in RAM), same rules as above |
+| name | `AT+MDNS=1,"<device name lowercase>","_http",80`: `http://<device name lowercase>.local`, the same name as on 2.4 GHz; when the modem refuses it the X shows `http://<ip>` (`status.address`) |
+| the modem's UART | the page's task owns it: an app's `http_request` through the modem gives `APP_EBUSY` while the page runs on 5 GHz, `net_up` says up without a command |
 
 ### Files profile (API 2.3)
 
@@ -424,7 +443,7 @@ status: the switch can take the window of a touch event, and that touch then nev
 
 | What | Rule |
 |---|---|
-| path choice | saved 5 GHz network (not enterprise) and the modem answers: `net_up` joins it on the modem (`AT+CWSTATE?`, else `AT+CWJAP`), `http_request` goes through it; 2.4 GHz stays on the S3. The Wi-Fi page never uses the modem (it serves from the S3). Rules `net_up_step` in `radio_share.h`, test `test_radio_share` |
+| path choice | saved 5 GHz network (not enterprise) and the modem answers: `net_up` joins it on the modem (`AT+CWSTATE?`, else `AT+CWJAP`), `http_request` goes through it; 2.4 GHz stays on the S3. The Wi-Fi page uses the modem only as a server ("Wi-Fi page on 5 GHz"). Rules `net_up_step` in `radio_share.h`, test `test_radio_share` |
 | why not ESP-AT's HTTP commands | `AT+HTTPCLIENT` takes a body only inside a 256-byte command; `AT+HTTPCPOST`/`PUT` keep the whole body in the modem's heap (`esp_http_client_set_post_field`, no streaming in `libesp32c5_at_core.a` v5.1) and print no status code |
 | how | the S3 speaks HTTP/1.1 over one `AT+CIPSTART` TCP or SSL link (`src/app_net_modem.cpp`, `lib/trmnl_x/src/modem_tcp.cpp`): request head, then the body straight from the app's buffer in `AT+CIPSEND` pieces of 8192 bytes (no copy, any size); response from `+IPD` frames into the app's buffer (Content-Length, chunked or until close; `truncated` as on the S3 path); `Connection: close`, no redirects (as on the S3 path) |
 | https | `SSL` link with SNI (`AT+CIPSSLCSNI`); the server certificate is **not verified** (the AT firmware holds no CA bundle) |

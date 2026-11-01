@@ -12,10 +12,12 @@
 
 #include "app_net_modem.h"
 #include "evlog.h"
+#include "webshare.h"
 
 bool app_net_modem_up(bool *joined, int *rssi) {
   *joined = false;
   *rssi = 0;
+  if (webshare_modem_owns_uart()) return true; // the Wi-Fi page serves through it: joined, its UART is taken
   Modem *m = wifiSessionModem();
   if (!m) return false;
   bool up = m->isJoined();
@@ -36,6 +38,10 @@ static char head[MODEM_HEAD_MAX];
 static modem_resp_t rs;
 
 int app_net_modem_request(const app_http_request_t *req, void *buf, size_t buf_len, app_http_response_t *resp) {
+  if (webshare_modem_owns_uart()) { // the Wi-Fi page's server runs on the modem; two users of one UART garble both
+    Log_event("Net: modem busy with the Wi-Fi page");
+    return APP_EBUSY;
+  }
   Modem *m = g_modem;
   const char *method = req->method && req->method[0] ? req->method : "GET";
   uint32_t t = req->timeout_ms ? req->timeout_ms : 15000;

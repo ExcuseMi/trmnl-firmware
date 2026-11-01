@@ -32,6 +32,14 @@ private:
   static void tcpOnPrompt(void *ctx);
   static void tcpOnPayload(void *ctx, const uint8_t *data, size_t len);
 
+  // The Wi-Fi page's server (modem_server.cpp): link events and data while it runs, one answer line captured
+  void (*_srvEvent)(void *ctx, int link, bool open) = nullptr;
+  void (*_srvData)(void *ctx, int link, const uint8_t *data, size_t len) = nullptr;
+  void *_srvCtx = nullptr;
+  const char *_capPrefix = nullptr;
+  char _cap[MODEM_AT_LINE_MAX];
+  void serverLine(const char *line);
+
 public:
   Modem(uint32_t baudRate);
   ~Modem();
@@ -95,4 +103,17 @@ public:
   // Reads until the server closes, `enough(ctx)` or `idleMs` pass without a byte
   TcpPumpEnd tcpPump(uint32_t idleMs, bool (*enough)(void *ctx), void *ctx);
   void tcpClose();
+
+  // The Wi-Fi page's TCP server on a 5 GHz network (modem_server.cpp; the HTTP side is lib/trmnl/ws_msrv.h).
+  // AT+CIPMUX=1, AT+CIPSERVERMAXCONN, AT+CIPSERVER=1,<port>, AT+CIPSTO; `ip` gets the station's address.
+  // While it runs, "<link>,CONNECT" / "<link>,CLOSED" go to `event` and "+IPD,<link>,<len>:" payloads to `data`.
+  typedef void (*SrvEvent)(void *ctx, int link, bool open);
+  typedef void (*SrvData)(void *ctx, int link, const uint8_t *data, size_t len);
+  bool serverStart(uint16_t port, int maxConn, uint16_t timeoutS, SrvEvent event, SrvData data, void *ctx, char *ip,
+                   size_t ipLen);
+  bool serverMdns(const char *host, uint16_t port); // AT+MDNS=1,...; false: the AT firmware refused it
+  size_t serverPump(); // reads what the UART holds (events and data); the bytes read
+  bool serverSend(int link, const uint8_t *data, size_t len, uint32_t timeoutMs); // one AT+CIPSEND=<link>,<len>
+  void serverClose(int link);
+  void serverStop(); // every link closed, server off, AT+CIPMUX=0 again for tcpOpen
 };

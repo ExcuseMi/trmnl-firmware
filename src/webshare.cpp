@@ -1,13 +1,13 @@
-// The writer's Wi-Fi page: an HTTP server on the X's own access point or on the home network, for a phone
-// browser. All decisions (names, code, no-overwrite, atomic writes, zip) are in lib/trmnl/webshare_*; this file
-// only connects them to the network and LittleFS.
+// The writer's Wi-Fi page: an HTTP server on the X's own access point (named like the device) or on the home network, for a phone
+// browser. All decisions (names, code, no-overwrite, atomic writes, zip) are in lib/trmnl/webshare_*, the handlers in
+// lib/trmnl/ws_page_*; this file connects them to LittleFS and picks the transport: AsyncWebServer on the S3's
+// 2.4 GHz radio (webshare_async.cpp), or on a saved 5 GHz network the ESP32-C5 modem (webshare_modem.cpp).
 #ifdef BOARD_TRMNL_X
 
 #include <app_sleep_gate.h>
 #include "evlog.h"
 #include "webshare.h"
 
-#include <ArduinoJson.h>
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
@@ -16,11 +16,8 @@
 #include <captive_ap.h>
 #include <esp_random.h>
 #include <trmnl_log.h>
-#include <webshare_auth.h>
-#include <webshare_mode.h>
-#include <webshare_store.h>
 #include <webshare_apps.h>
-#include <webshare_zip.h>
+#include <webshare_mode.h>
 #include <webshare_host.h>
 #include <config.h>
 #include <wifi_network.h>
@@ -30,10 +27,8 @@
 
 #include "app_host.h"
 #include "webshare_internal.h"
-#include "webshare_page.h"
 
 #define WS_AP_URL "http://4.3.2.1"
-#define WS_LIST_MAX 200
 
 // The device's own name for the access point and mDNS (webshare_host.h), made at each start
 static char dev_ssid[WS_HOST_MAX + 1], dev_host[WS_HOST_MAX + 1];
@@ -140,305 +135,34 @@ static const ws_fs_t FS_ROOT = {(void *)"", fs_stat, fs_open, fs_read, fs_write,
                                 fs_mkdir, fs_list, fs_free, fs_mtime};
 
 const ws_fs_t *webshare_fs_root(void) { return &FS_ROOT; }
-const ws_fs_t *webshare_fs_app(void) { return &FS; }
-uint64_t webshare_free_bytes(void) { return fs_free(nullptr); }
+
 
 // ---- state ----
 
 webshare_state_t S;
-
-ws_upload_t upload;
-const void *upload_owner;
-uint32_t upload_last_chunk;
-static bool zip_busy;
-
-
-// ---- request helpers ----
-
-void send_json(AsyncWebServerRequest *r, int code, const String &body) {
-  AsyncWebServerResponse *res = r->beginResponse(code, "application/json", body);
-  res->addHeader("Cache-Control", "no-store");
-  r->send(res);
-}
-
-void send_error(AsyncWebServerRequest *r, int code, const char *what) {
-  JsonDocument d;
-  d["error"] = what;
-  String s;
-  serializeJson(d, s);
-  send_json(r, code, s);
-}
-
-String session_cookie(AsyncWebServerRequest *r) {
-  if (!r->hasHeader("Cookie")) return String();
-  String c = r->header("Cookie");
-  int at = c.indexOf("wsid=");
-  return at < 0 ? String() : c.substring(at + 5, at + 5 + WS_TOKEN_LEN);
-}
-
-static bool session_ok(AsyncWebServerRequest *r) { return ws_auth_session_ok(&S.auth, session_cookie(r).c_str()); }
-
-// A request with a good session (and, for anything that changes data, the header only our page sends: another
-// site's form cannot add it). Refreshes the idle timer.
-static bool guard(AsyncWebServerRequest *r, bool changes, bool reply = true) {
-  if (!S.running || !session_ok(r) || (changes && !r->hasHeader("X-Writer"))) {
-    if (reply) send_error(r, 401, "type the code first");
-    return false;
-  }
-  S.last_request = millis();
-  return true;
-}
-
-bool webshare_authorized(AsyncWebServerRequest *r, bool changes) {
-  return S.install ? webshare_install_allowed(r) : guard(r, changes, false);
-}
-
-String param(AsyncWebServerRequest *r, const char *name, bool post) {
-  const AsyncWebParameter *p = r->getParam(name, post);
-  return p ? p->value() : String();
-}
-
-int http_code(ws_result_t rc) {
-  switch (rc) {
-  case WS_OK: return 200;
-  case WS_E_NAME: case WS_E_SHORT: return 400;
-  case WS_E_NOT_FOUND: return 404;
-  case WS_E_EXISTS: case WS_E_KEEP_FAILED: return 409;
-  case WS_E_TOO_BIG: return 413;
-  case WS_E_BUSY: return 503;
-  case WS_E_NO_SPACE: return 507;
-  default: return 500;
-  }
-}
-
-// ---- routes ----
-
-static bool on_list_doc(const char *path, uint32_t size, ws_kind_t kind, void *ctx) {
-  JsonArray a = *(JsonArray *)ctx;
-  (void)kind;
-  JsonObject o = a.add<JsonObject>();
-  o["p"] = path;
-  o["s"] = size;
-  return true;
-}
-
-static void handle_list(AsyncWebServerRequest *r) {
-  if (!guard(r, false)) return;
-  JsonDocument d;
-  JsonArray docs = d["docs"].to<JsonArray>(), fonts = d["fonts"].to<JsonArray>();
-  // documents first, then fonts: ws_store_list(fonts=true) lists fonts before documents, so list them apart
-  struct Both { JsonArray docs, fonts; } both = {docs, fonts};
-  ws_store_list(&FS, true, WS_LIST_MAX, [](const char *path, uint32_t size, ws_kind_t kind, void *ctx) {
-    Both *b = (Both *)ctx;
-    return on_list_doc(path, size, kind, kind == WS_FONT ? &b->fonts : &b->docs);
-  }, &both);
-  d["free"] = (uint32_t)fs_free(nullptr);
-  String s;
-  serializeJson(d, s);
-  send_json(r, 200, s);
-}
-
-static void handle_login(AsyncWebServerRequest *r) {
-  if (!S.running || !r->hasHeader("X-Writer")) return send_error(r, 401, "not available");
-  S.last_request = millis();
-  String pin = param(r, "pin", true);
-  uint32_t rnd[2] = {esp_random(), esp_random()};
-  char token[WS_TOKEN_LEN + 1];
-  ws_auth_result_t res = ws_auth_login(&S.auth, pin.c_str(), millis(), rnd, token);
-  if (res == WS_AUTH_OK) {
-    AsyncWebServerResponse *out = r->beginResponse(200, "application/json", "{\"ok\":true}");
-    out->addHeader("Set-Cookie", String("wsid=") + token + "; Path=/; HttpOnly; SameSite=Strict");
-    out->addHeader("Cache-Control", "no-store");
-    r->send(out);
-  } else if (res == WS_AUTH_WRONG) {
-    send_error(r, 403, "wrong code");
-  } else if (res == WS_AUTH_LOCKED) {
-    send_error(r, 429, "too many wrong codes: wait a minute or more");
-  } else {
-    send_error(r, 423, "too many wrong codes: switched off, start it again on the X");
-  }
-}
-
-static void handle_get(AsyncWebServerRequest *r) {
-  if (!guard(r, false)) return;
-  String p = param(r, "p");
-  char path[128];
-  uint32_t size;
-  bool dir;
-  if (ws_classify(p.c_str()) != WS_DOC || fs_stat(base_dir, p.c_str(), &size, &dir) != 0 || dir ||
-      !full(base_dir, p.c_str(), path, sizeof(path))) {
-    return send_error(r, 404, "no such document");
-  }
-  AsyncWebServerResponse *res = r->beginResponse(LittleFS, path, "application/octet-stream", true);
-  res->addHeader("Cache-Control", "no-store");
-  r->send(res);
-}
-
-typedef struct {
-  ws_zip_t z;
-  ws_zip_entry_t entries[WS_ZIP_MAX_FILES];
-  char paths[WS_ZIP_MAX_FILES][WS_PATH_MAX + 1];
-  const char *ptrs[WS_ZIP_MAX_FILES];
-  int n;
-} zip_job_t;
-
-static void handle_zip(AsyncWebServerRequest *r) {
-  if (!guard(r, false)) return;
-  if (zip_busy) return send_error(r, 503, "another zip is being made");
-  zip_job_t *job = new (std::nothrow) zip_job_t;
-  if (!job) return send_error(r, 503, "out of memory");
-  job->n = 0;
-  ws_store_list(&FS, false, WS_ZIP_MAX_FILES, [](const char *path, uint32_t, ws_kind_t, void *ctx) {
-    zip_job_t *j = (zip_job_t *)ctx;
-    strcpy(j->paths[j->n], path);
-    j->ptrs[j->n] = j->paths[j->n];
-    j->n++;
-    return true;
-  }, job);
-  if (!ws_zip_begin(&job->z, &FS, job->entries, job->ptrs, job->n)) {
-    delete job;
-    return send_error(r, 500, "zip failed");
-  }
-  zip_busy = true;
-  AsyncWebServerResponse *res = r->beginChunkedResponse(
-      "application/zip", [job, r](uint8_t *buf, size_t max, size_t) -> size_t {
-        int n = ws_zip_read(&job->z, buf, max);
-        if (n < 0) { // a file could not be read: cut the connection so the phone sees a failed download
-          Log_error("webshare: zip aborted, a file could not be read");
-          r->client()->abort();
-          return 0;
-        }
-        S.last_request = millis();
-        return (size_t)n;
-      });
-  res->addHeader("Content-Disposition", String("attachment; filename=\"") + dev_host + "-documents.zip\"");
-  res->addHeader("Cache-Control", "no-store");
-  r->onDisconnect([job]() {
-    ws_zip_end(&job->z);
-    delete job;
-    zip_busy = false;
-  });
-  r->send(res);
-}
-
-static void handle_rename(AsyncWebServerRequest *r) {
-  if (!guard(r, true)) return;
-  ws_result_t rc = ws_store_rename(&FS, param(r, "from").c_str(), param(r, "to").c_str());
-  if (rc == WS_OK) return send_json(r, 200, "{\"ok\":true}");
-  send_error(r, http_code(rc), ws_result_str(rc));
-}
-
-static void handle_delete(AsyncWebServerRequest *r) {
-  if (!guard(r, true)) return;
-  ws_result_t rc = ws_store_delete(&FS, param(r, "p").c_str());
-  if (rc == WS_OK) return send_json(r, 200, "{\"ok\":true}");
-  send_error(r, http_code(rc), ws_result_str(rc));
-}
-
-// One piece of an upload. One upload at a time (the rest get 503). Writer: raw file bytes of POST /api/put?p=<path>.
-void webshare_feed_upload(AsyncWebServerRequest *r, const char *name, uint8_t *data, size_t len, size_t index,
-                          size_t total, bool last, bool exact) {
-  up_req_t *q = (up_req_t *)r->_tempObject;
-  if (index == 0) {
-    q = (up_req_t *)calloc(1, sizeof(up_req_t));
-    r->_tempObject = q;
-    if (!q) return;
-    if (!webshare_authorized(r, true)) {
-      q->unauth = true;
-      return;
-    }
-    xSemaphoreTake(S.lock, portMAX_DELAY);
-    q->rc = S.install ? ws_apps_begin(&upload, &FS_ROOT, name, (uint32_t)total)
-            : S.files ? ws_files_begin(&upload, &FS, &files_cfg, name, (uint32_t)total)
-                      : ws_upload_begin(&upload, &FS, name, (uint32_t)total);
-    q->began = q->rc == WS_OK;
-    if (q->began) {
-      upload_owner = r;
-      upload_last_chunk = millis();
-      r->onDisconnect([r]() { // cable pulled, phone gone: drop the temporary file
-        xSemaphoreTake(S.lock, portMAX_DELAY);
-        if (upload_owner == r) {
-          ws_upload_abort(&upload);
-          upload_owner = nullptr;
-        }
-        xSemaphoreGive(S.lock);
-      });
-    }
-    xSemaphoreGive(S.lock);
-  }
-  if (!q || !q->began) return;
-  xSemaphoreTake(S.lock, portMAX_DELAY);
-  if (upload_owner == r) {
-    S.last_request = upload_last_chunk = millis();
-    q->rc = ws_upload_chunk(&upload, data, len);
-    if (q->rc != WS_OK) {
-      q->began = false;
-      upload_owner = nullptr;
-    } else if (last) {
-      if (S.install) webshare_install_finish(q, exact);
-      else q->rc = ws_upload_end(&upload, &q->how, q->final_path);
-      q->began = false;
-      q->done = true;
-      upload_owner = nullptr;
-    }
-  } else {
-    q->began = false; // the stall check dropped it
-    q->rc = WS_E_SHORT;
-  }
-  xSemaphoreGive(S.lock);
-}
-
-static void handle_put_body(AsyncWebServerRequest *r, uint8_t *data, size_t len, size_t index, size_t total) {
-  webshare_feed_upload(r, param(r, "p").c_str(), data, len, index, total, index + len == total, true);
-}
-
-static void handle_put(AsyncWebServerRequest *r) {
-  up_req_t *q = (up_req_t *)r->_tempObject;
-  if (!guard(r, true)) return;
-  up_req_t empty = {};
-  if (!q) { // no body: an empty file
-    xSemaphoreTake(S.lock, portMAX_DELAY);
-    empty.rc = ws_upload_begin(&upload, &FS, param(r, "p").c_str(), 0);
-    if (empty.rc == WS_OK) empty.rc = ws_upload_end(&upload, &empty.how, empty.final_path);
-    empty.done = empty.rc == WS_OK;
-    xSemaphoreGive(S.lock);
-    q = &empty;
-  }
-  if (q->rc != WS_OK || !q->done) {
-    return send_error(r, http_code(q->rc == WS_OK ? WS_E_SHORT : q->rc), ws_result_str(q->rc == WS_OK ? WS_E_SHORT : q->rc));
-  }
-  JsonDocument d;
-  d["ok"] = true;
-  d["how"] = q->how == WS_PUT_NEW ? "new" : q->how == WS_PUT_SAME ? "same" : "both";
-  d["path"] = q->final_path;
-  String s;
-  serializeJson(d, s);
-  send_json(r, 200, s);
-}
+static AsyncWebServer *server;
+static DNSServer *dns;
 
 // ---- start, stop, status ----
 
 static void stop_locked() {
-  if (!S.running) return;
-  S.running = false;
-  if (upload_owner) { // a half upload: the temporary file goes
-    ws_upload_abort(&upload);
-    upload_owner = nullptr;
-  }
-  if (S.server) {
-    S.server->end();
-    delete S.server;
-    S.server = nullptr;
+  if (!WP.running) return;
+  WP.running = false; // the modem's task sees it, closes its links and the server itself
+  ws_page_drop_upload(); // a half upload: the temporary file goes
+  if (server) {
+    server->end();
+    delete server;
+    server = nullptr;
   }
   if (S.mode == APP_WEBSHARE_AP) {
-    if (S.dns) {
-      S.dns->stop();
-      delete S.dns;
-      S.dns = nullptr;
+    if (dns) {
+      dns->stop();
+      delete dns;
+      dns = nullptr;
     }
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_STA);
-  } else {
+  } else if (!S.modem) {
     MDNS.end();
     if (ws_release_wifi_on_stop(S.mode, S.connected_before)) {
       WiFi.disconnect(true);
@@ -451,17 +175,11 @@ static void stop_locked() {
 
 // Switches the page off after WS_IDLE_MS without a request, and drops an upload that stopped coming
 static void watch_task(void *) {
-  while (S.running) {
+  while (WP.running) {
     vTaskDelay(pdMS_TO_TICKS(2000));
     xSemaphoreTake(S.lock, portMAX_DELAY);
-    if (S.running && upload_owner && millis() - upload_last_chunk > WS_UPLOAD_STALL_MS) {
-      Log_error("webshare: upload stalled, dropped");
-      ws_upload_abort(&upload);
-      upload_owner = nullptr;
-    }
-    // never while an upload runs: it would end as "no connection" in the browser
-    bool idle = !upload_owner && ws_idle_expired(S.last_request, millis());
-    if (S.running && (idle || S.auth.fails >= WS_MAX_FAILS)) {
+    bool idle = false;
+    if (ws_page_tick(millis(), &idle)) {
       Log_info("webshare: idle or locked out, switching off");
       evlog_add("webshare: switched off, %s", idle ? "idle" : "too many wrong codes");
       stop_locked();
@@ -477,106 +195,73 @@ void webshare_stop(void) {
   xSemaphoreTake(S.lock, portMAX_DELAY);
   stop_locked();
   xSemaphoreGive(S.lock);
-  for (int i = 0; i < 30 && S.watch_alive; i++) vTaskDelay(pdMS_TO_TICKS(100)); // the watcher leaves by itself
+  // the watcher and the modem's task leave by themselves
+  for (int i = 0; i < 50 && (S.watch_alive || webshare_modem_alive()); i++) vTaskDelay(pdMS_TO_TICKS(100));
 }
 
-static void add_routes(AsyncWebServer &server) {
-  if (S.mode == APP_WEBSHARE_AP) captive_ap_routes(server, WS_AP_URL);
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
-    if (r->hasParam("t")) { // the one-time link from the X's QR: log in, then drop the token from the address
-      uint32_t rnd[2] = {esp_random(), esp_random()};
-      char sid[WS_TOKEN_LEN + 1];
-      S.last_request = millis();
-      if (ws_auth_token_login(&S.auth, param(r, "t").c_str(), millis(), rnd, sid) == WS_AUTH_OK) {
-        AsyncWebServerResponse *go = r->beginResponse(302);
-        go->addHeader("Location", "/");
-        go->addHeader("Set-Cookie", String("wsid=") + sid + "; Path=/; HttpOnly; SameSite=Strict");
-        go->addHeader("Cache-Control", "no-store");
-        return r->send(go);
-      }
-    }
-    AsyncWebServerResponse *res = r->beginResponse(
-        200, "text/html; charset=utf-8",
-        S.install    ? webshare_install_page()
-        : S.files    ? webshare_files_page()
-        : S.settings ? webshare_settings_page()
-                     : WEBSHARE_PAGE);
-    res->addHeader("Cache-Control", "no-store");
-    r->send(res);
-  });
-  server.on("/api/login", HTTP_POST, handle_login);
-  webshare_kbd_routes(server); // the X's keyboard layout, on every profile's page
-  if (S.install || S.files || S.settings) {
-    if (S.install) webshare_install_routes(server);
-    else if (S.files) webshare_files_routes(server);
-    else webshare_settings_routes(server);
-    server.onNotFound([](AsyncWebServerRequest *r) {
-      if (S.mode == APP_WEBSHARE_AP) r->redirect(WS_AP_URL);
-      else r->send(404);
-    });
-    return;
-  }
-  server.on("/api/list", HTTP_GET, handle_list);
-  server.on("/api/get", HTTP_GET, handle_get);
-  server.on("/api/zip", HTTP_GET, handle_zip);
-  server.on("/api/rename", HTTP_POST, handle_rename);
-  server.on("/api/delete", HTTP_POST, handle_delete);
-  server.on("/api/put", HTTP_POST, handle_put, nullptr, handle_put_body);
-  server.onNotFound([](AsyncWebServerRequest *r) {
-    if (S.mode == APP_WEBSHARE_AP) r->redirect(WS_AP_URL);
-    else r->send(404);
-  });
+// The network: the S3's own station (2.4 GHz), else on a saved 5 GHz network the modem, else (AUTO) the access point
+static bool pick_network(app_webshare_mode_t requested, app_webshare_mode_t *mode, bool *modem) {
+  *modem = false;
+  bool up = requested != APP_WEBSHARE_AP && app_host_net_up();
+  if (!up && requested != APP_WEBSHARE_AP && app_host_net_up_modem()) up = *modem = true;
+  return ws_pick_mode(requested, up, mode);
+}
+
+static int start_modem(void) {
+  bool mdns_ok = false;
+  int rc = webshare_modem_start(dev_host, S.ip, sizeof(S.ip), &mdns_ok);
+  if (rc) return rc;
+  // without mDNS the X shows the address with the IP (docs/apps.md "Wi-Fi page on 5 GHz")
+  if (mdns_ok) snprintf(S.address, sizeof(S.address), "http://%s.local", dev_host);
+  else snprintf(S.address, sizeof(S.address), "http://%s", S.ip);
+  return 0;
 }
 
 int webshare_start_profile(app_webshare_mode_t requested, int profile) {
-  bool install = profile == WS_PROFILE_INSTALL;
   if (requested != APP_WEBSHARE_AUTO && requested != APP_WEBSHARE_AP && requested != APP_WEBSHARE_HOME) {
     return APP_EINVAL;
   }
   if (!S.lock) S.lock = xSemaphoreCreateMutex();
   if (!S.lock) return APP_ENOMEM;
   webshare_stop(); // a new start is a new code
+  if (webshare_modem_alive()) return APP_EBUSY; // the last modem server has not closed yet
   app_webshare_mode_t mode;
+  bool modem;
   bool connected_before = WiFi.status() == WL_CONNECTED;
-  bool wifi_up = requested == APP_WEBSHARE_AP ? false : app_host_net_up();
-  if (!ws_pick_mode(requested, wifi_up, &mode)) return APP_ENONET;
+  if (!pick_network(requested, &mode, &modem)) return APP_ENONET;
   if (mode == APP_WEBSHARE_AP) Log_info("webshare: no home network, using the access point");
 
   make_dev_names();
   xSemaphoreTake(S.lock, portMAX_DELAY);
-  S.install = install;
-  S.files = profile == WS_PROFILE_FILES;
-  S.settings = profile == WS_PROFILE_SETTINGS;
-  if (install) { // the file system root, the apps folder
+  if (profile == WS_PROFILE_INSTALL) { // the file system root, the apps folder
     LittleFS.mkdir(APPS_DIR);
     ws_apps_cleanup(&FS_ROOT);
   } else {
     snprintf(base_dir, sizeof(base_dir), "%s", app_host.dir);
     LittleFS.mkdir(APPS_DATA_DIR);
     LittleFS.mkdir(base_dir);
-    if (S.files) ws_files_cleanup(&FS, &files_cfg); // a temporary file a power loss left
-    else if (!S.settings) ws_store_cleanup(&FS);
+    if (profile == WS_PROFILE_FILES) ws_files_cleanup(&FS, &WP.files_cfg); // a temporary file a power loss left
+    else if (profile == WS_PROFILE_WRITER) ws_store_cleanup(&FS);
   }
-  memset(&S.auth, 0, sizeof(S.auth));
-  ws_auth_init(&S.auth, esp_random());
-  uint32_t tok[4] = {esp_random(), esp_random(), esp_random(), esp_random()};
-  ws_auth_new_token(&S.auth, tok, millis());
+  WP.ap_url = WS_AP_URL;
+  WP.host = dev_host;
+  ws_page_start(profile, mode == APP_WEBSHARE_AP, &WEBSHARE_ENV, &FS, &FS_ROOT);
   S.mode = mode;
+  S.modem = modem;
   S.connected_before = connected_before;
-  S.last_request = millis();
   S.network[0] = '\0';
-  upload_owner = nullptr;
-  zip_busy = false;
   int rc = 0;
-  S.server = new (std::nothrow) AsyncWebServer(80);
-  if (!S.server) {
+  WP.running = true; // before the modem's task starts: it runs while this is set
+  if (modem) {
+    rc = start_modem();
+  } else if (!(server = new (std::nothrow) AsyncWebServer(80))) {
     rc = APP_ENOMEM;
   } else if (mode == APP_WEBSHARE_AP) {
-    S.dns = new (std::nothrow) DNSServer();
-    if (!S.dns) {
+    dns = new (std::nothrow) DNSServer();
+    if (!dns) {
       rc = APP_ENOMEM;
     } else {
-      captive_ap_up(IPAddress(4, 3, 2, 1), dev_ssid, nullptr, *S.dns);
+      captive_ap_up(IPAddress(4, 3, 2, 1), dev_ssid, nullptr, *dns);
       snprintf(S.network, sizeof(S.network), "%s", dev_ssid);
       snprintf(S.address, sizeof(S.address), "%s", WS_AP_URL);
       snprintf(S.ip, sizeof(S.ip), "4.3.2.1");
@@ -589,45 +274,49 @@ int webshare_start_profile(app_webshare_mode_t requested, int profile) {
   }
   if (rc == 0) {
     snprintf(S.url, sizeof(S.url), "http://%s/", S.ip);
-    add_routes(*S.server);
-    S.server->begin();
-    S.running = true;
+    if (server) {
+      webshare_async_routes(*server, mode == APP_WEBSHARE_AP, WS_AP_URL);
+      server->begin();
+    }
     S.watch_alive = true;
     if (xTaskCreate(watch_task, "webshare", 4096, nullptr, 1, nullptr) != pdPASS) {
       S.watch_alive = false;
       rc = APP_ENOMEM;
       stop_locked();
     }
-  } else if (S.server) {
-    delete S.server;
-    S.server = nullptr;
-    delete S.dns;
-    S.dns = nullptr;
+  } else {
+    WP.running = false;
+    delete server;
+    server = nullptr;
+    delete dns;
+    dns = nullptr;
   }
   xSemaphoreGive(S.lock);
-  if (rc == 0) Log_info("webshare: on, %s mode, %s", mode == APP_WEBSHARE_AP ? "access point" : "home network", S.address);
+  if (rc == 0) {
+    Log_info("webshare: on, %s, %s", mode == APP_WEBSHARE_AP ? "access point" : modem ? "home network (modem, 5 GHz)" : "home network",
+             S.address);
+  }
   return rc;
 }
 
 int webshare_start(app_webshare_mode_t requested) { return webshare_start_profile(requested, WS_PROFILE_WRITER); }
-int webshare_start_install(void) { return webshare_start_profile(APP_WEBSHARE_AUTO, WS_PROFILE_INSTALL); }
 
 int webshare_status(app_webshare_status_t *st) {
   if (!st) return APP_EINVAL;
   memset(st, 0, sizeof(*st));
-  if (!S.lock || !S.running) return 0;
+  if (!S.lock || !WP.running) return 0;
   st->running = true;
   st->mode = S.mode;
   snprintf(st->url, sizeof(st->url), "%s", S.url);
-  if (S.auth.login_token[0]) snprintf(st->login_url, sizeof(st->login_url), "%s?t=%s", S.url, S.auth.login_token);
+  if (WP.auth.login_token[0]) snprintf(st->login_url, sizeof(st->login_url), "%s?t=%s", S.url, WP.auth.login_token);
   else snprintf(st->login_url, sizeof(st->login_url), "%s", S.url); // used up: the code is what is left
-  snprintf(st->code, sizeof(st->code), "%s", S.auth.pin);
+  snprintf(st->code, sizeof(st->code), "%s", WP.auth.pin);
   snprintf(st->network, sizeof(st->network), "%s", S.network);
   snprintf(st->address, sizeof(st->address), "%s", S.address);
   snprintf(st->ip, sizeof(st->ip), "%s", S.ip);
-  uint32_t used = millis() - S.last_request;
+  uint32_t used = millis() - WP.last_request;
   st->idle_left_s = used >= WS_IDLE_MS ? 0 : (WS_IDLE_MS - used) / 1000;
-  st->locked = S.auth.fails >= WS_MAX_FAILS ? 2 : ws_auth_lock_left(&S.auth, millis()) ? 1 : 0;
+  st->locked = WP.auth.fails >= WS_MAX_FAILS ? 2 : ws_auth_lock_left(&WP.auth, millis()) ? 1 : 0;
   return 0;
 }
 

@@ -325,7 +325,7 @@ typedef enum {
   APP_WEBSHARE_AUTO = 0, // the default: the saved home network, so the phone stays on its Wi-Fi; only when none is
                          // reachable the access point below (webshare_status says which)
   APP_WEBSHARE_AP = 1, // own access point named like the device, open, address http://4.3.2.1 (the phone's captive portal opens it)
-  APP_WEBSHARE_HOME = 2, // on the saved home network, http://<device>.local (2.4 GHz only, like net_up)
+  APP_WEBSHARE_HOME = 2, // on the saved home network, http://<device>.local (5 GHz through the modem, like net_up)
 } app_webshare_mode_t;
 
 typedef struct {

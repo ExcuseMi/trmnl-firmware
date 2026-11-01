@@ -155,6 +155,42 @@ void test_at_stream_binary_payload_and_bad_frame() {
   TEST_ASSERT_EQUAL(MODEM_AT_LINE_MAX - 1, seen.lines.find('|', seen.lines.find("long")) - seen.lines.find("long"));
 }
 
+// The Wi-Fi page's server (AT+CIPMUX=1): "+IPD,<link>,<len>:" frames, each payload with its link id
+struct link_seen_t {
+  modem_at_rx_t *rx;
+  std::string lines, per_link[16];
+};
+static void ln_line(void *c, const char *l) { ((link_seen_t *)c)->lines += std::string(l) + "|"; }
+static void ln_payload(void *c, const uint8_t *d, size_t n) {
+  link_seen_t *s = (link_seen_t *)c;
+  TEST_ASSERT_TRUE(s->rx->link >= 0 && s->rx->link < 16);
+  s->per_link[s->rx->link].append((const char *)d, n);
+}
+
+void test_at_stream_link_ids() {
+  std::string s = "0,CONNECT\r\n+IPD,0,5:hello1,CONNECT\r\n+IPD,1,3:a\r\n+IPD,12,2:zz+IPD,0,2:!!0,CLOSED\r\n";
+  for (size_t step = 1; step <= s.size(); step++) {
+    modem_at_rx_t rx;
+    link_seen_t seen;
+    seen.rx = &rx;
+    modem_at_sink_t k = {ln_line, nullptr, ln_payload, &seen};
+    modem_at_rx_init(&rx);
+    feed_bytewise(&rx, s, &k, step);
+    TEST_ASSERT_EQUAL_STRING("0,CONNECT|1,CONNECT|0,CLOSED|", seen.lines.c_str());
+    TEST_ASSERT_EQUAL_STRING("hello!!", seen.per_link[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("a\r\n", seen.per_link[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("zz", seen.per_link[12].c_str());
+  }
+  modem_at_rx_t rx; // single link: no id
+  link_seen_t seen;
+  seen.rx = &rx;
+  modem_at_sink_t k = {ln_line, nullptr, nullptr, &seen};
+  modem_at_rx_init(&rx);
+  feed_bytewise(&rx, "+IPD,3:abc+IPD,123,4:abcd", &k, 1);
+  TEST_ASSERT_EQUAL(-1, rx.link); // "+IPD,3:" has none; "+IPD,123,4:" is no frame (link ids have 1 or 2 digits)
+  TEST_ASSERT_EQUAL(1, rx.bad_frames);
+}
+
 // ---- response ----
 
 static void feed_str(modem_resp_t *r, const std::string &s, size_t step) {
@@ -291,6 +327,7 @@ int main() {
   RUN_TEST(test_one_megabyte_body_in_cipsend_chunks);
   RUN_TEST(test_at_stream_splits_lines_prompt_and_ipd_in_any_pieces);
   RUN_TEST(test_at_stream_binary_payload_and_bad_frame);
+  RUN_TEST(test_at_stream_link_ids);
   RUN_TEST(test_response_content_length_into_buffer);
   RUN_TEST(test_response_truncated_like_the_s3_path);
   RUN_TEST(test_response_exactly_fitting_is_not_truncated);
