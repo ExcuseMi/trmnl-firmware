@@ -44,6 +44,8 @@ int usb_pen_x_full_mode(uint8_t addr, uint8_t iface);
 // layout comes with each report
 void usb_pen_x_mouse_attach(uint16_t vid, uint16_t pid);
 void usb_pen_x_mouse_detach(void);
+// The device setting mouse_speed (x_devset.h) again: read at each plug-in and after the page or an app changed it
+void usb_pen_x_mouse_speed_reload(void);
 void usb_pen_x_mouse_report(const usb_mouse_layout_t *l, const uint8_t *d, size_t len);
 
 // The mode of the reports taken so far (APP_PEN_MODE_*), for the connect log

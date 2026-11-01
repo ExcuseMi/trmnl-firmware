@@ -188,6 +188,31 @@ void test_leaving_lets_everything_go() {
   TEST_ASSERT_FALSE(usb_mouse_move(&m, &any, &ev)); // out of range: no events
 }
 
+// The device setting mouse_speed (x_devset.h) scales the motion: slow half, fast 1.75 times
+void test_speed_setting_scales_motion() {
+  TEST_ASSERT_EQUAL(USB_MOUSE_SLOW, usb_mouse_speed("slow"));
+  TEST_ASSERT_EQUAL(USB_MOUSE_FAST, usb_mouse_speed("fast"));
+  TEST_ASSERT_EQUAL(USB_MOUSE_NORMAL, usb_mouse_speed("normal"));
+  TEST_ASSERT_EQUAL(USB_MOUSE_NORMAL, usb_mouse_speed(""));
+  TEST_ASSERT_EQUAL(USB_MOUSE_NORMAL, usb_mouse_speed(nullptr));
+  TEST_ASSERT_EQUAL(USB_MOUSE_NORMAL, usb_mouse_speed("FAST")); // only the stored words
+  usb_mouse_move_t a = mv(0, 4, 0);
+  int got[3];
+  const uint8_t q[3] = {USB_MOUSE_SLOW, USB_MOUSE_NORMAL, USB_MOUSE_FAST};
+  for (int i = 0; i < 3; i++) {
+    usb_mouse_init(&m, 1872, 1404);
+    usb_mouse_set_speed(&m, q[i]);
+    usb_mouse_enter(&m, &ev);
+    usb_mouse_move(&m, &a, &ev);
+    got[i] = ev.x - 32768;
+  }
+  TEST_ASSERT_EQUAL(16, got[0]);
+  TEST_ASSERT_EQUAL(32, got[1]);
+  TEST_ASSERT_EQUAL(56, got[2]);
+  usb_mouse_set_speed(&m, 99); // out of range: normal
+  TEST_ASSERT_EQUAL(USB_MOUSE_NORMAL, m.quarters);
+}
+
 void test_info() {
   app_pen_info_t i;
   usb_mouse_info(0x046d, 0xc077, 209664, 157248, &i);
@@ -210,6 +235,7 @@ int main() {
   RUN_TEST(test_clamped_at_the_edges_and_no_event_when_stuck);
   RUN_TEST(test_buttons_map_to_tip_and_barrels);
   RUN_TEST(test_leaving_lets_everything_go);
+  RUN_TEST(test_speed_setting_scales_motion);
   RUN_TEST(test_info);
   return UNITY_END();
 }

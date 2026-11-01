@@ -46,16 +46,25 @@ typedef struct {
   int32_t x, y; // 1/16 of a pen unit (0..65535 * 16)
   uint32_t w, h; // the screen's shape (pixels); the same movement on screen in both directions
   uint8_t flags; // APP_PEN_* last sent
+  uint8_t quarters; // the speed: gain in quarters of normal (USB_MOUSE_SLOW .. USB_MOUSE_FAST)
 } usb_mouse_t;
 
-// At the centre, out of range. w and h: the aspect of the screen (0: square)
+#define USB_MOUSE_SLOW   2 // half
+#define USB_MOUSE_NORMAL 4
+#define USB_MOUSE_FAST   7 // 1.75 times
+
+// At the centre, out of range, normal speed. w and h: the aspect of the screen (0: square)
 void usb_mouse_init(usb_mouse_t *m, uint32_t w, uint32_t h);
+// The device setting mouse_speed (x_devset.h: slow|normal|fast) as quarters; anything else (none stored): normal
+uint8_t usb_mouse_speed(const char *setting);
+// Scales every later move; a value outside SLOW..FAST is taken as normal
+void usb_mouse_set_speed(usb_mouse_t *m, uint8_t quarters);
 
 // The mouse came: in range at the cursor. 1 with *out filled
 int usb_mouse_enter(usb_mouse_t *m, app_pen_event_t *out);
 // The mouse went: nothing stays down, out of range. 1 with *out filled, 0 if nothing was on
 int usb_mouse_leave(usb_mouse_t *m, app_pen_event_t *out);
-// Moves the cursor (8 units per count, up to twice that for fast motion, clamped to the edges) and takes the buttons.
+// Moves the cursor (8 units per count at normal speed, up to twice that for fast motion, clamped to the edges) and takes the buttons.
 // 1 with *out filled, 0 when nothing changed (no motion left after clamping, same buttons). Only while in range
 int usb_mouse_move(usb_mouse_t *m, const usb_mouse_move_t *mv, app_pen_event_t *out);
 

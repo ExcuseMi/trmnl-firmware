@@ -171,6 +171,17 @@ void usb_mouse_init(usb_mouse_t *m, uint32_t w, uint32_t h) {
   m->w = w ? w : 1;
   m->h = h ? h : m->w;
   m->x = m->y = 32768 * UNIT;
+  m->quarters = USB_MOUSE_NORMAL;
+}
+
+uint8_t usb_mouse_speed(const char *s) {
+  if (s && strcmp(s, "slow") == 0) return USB_MOUSE_SLOW;
+  if (s && strcmp(s, "fast") == 0) return USB_MOUSE_FAST;
+  return USB_MOUSE_NORMAL;
+}
+
+void usb_mouse_set_speed(usb_mouse_t *m, uint8_t q) {
+  m->quarters = q >= USB_MOUSE_SLOW && q <= USB_MOUSE_FAST ? q : USB_MOUSE_NORMAL;
 }
 
 static void fill(const usb_mouse_t *m, uint8_t flags, app_pen_event_t *out) {
@@ -206,6 +217,7 @@ int usb_mouse_move(usb_mouse_t *m, const usb_mouse_move_t *mv, app_pen_event_t *
   int64_t extra = speed > ACCEL_FROM ? speed - ACCEL_FROM : 0;
   if (extra > ACCEL_MAX) extra = ACCEL_MAX;
   int64_t gain = BASE_GAIN + extra * ACCEL_STEP; // pen units = counts * gain / 16; the cursor is in 1/16 units
+  gain = gain * m->quarters / USB_MOUSE_NORMAL; // the device setting mouse_speed
   int32_t nx = clamp_fp((int64_t)m->x + (int64_t)mv->dx * gain);
   // y: the same distance on screen, so scaled by h / w
   int32_t ny = clamp_fp((int64_t)m->y + (int64_t)mv->dy * gain * (int64_t)m->h / (int64_t)m->w);

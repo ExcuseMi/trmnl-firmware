@@ -8,6 +8,7 @@
 #include <trmnl_log.h>
 #include <x_devset.h>
 
+#include "usb_pen_x.h"
 #include "x_devset_x.h"
 
 #define NS "xdev"
@@ -61,6 +62,7 @@ int x_devset_set(const char *key, const char *v, size_t len) {
     rc = p.putBytes(key, v, len) == len ? 0 : APP_EIO;
   }
   p.end();
+  if (rc == 0 && !strcmp(key, "mouse_speed")) usb_pen_x_mouse_speed_reload(); // a mouse plugged in now follows at once
   return rc;
 }
 

@@ -3,6 +3,7 @@
 
 #include "usb_dev_log.h"
 #include "usb_pen_x.h"
+#include "x_devset_x.h"
 
 #include <Arduino.h>
 #include <string.h>
@@ -155,8 +156,19 @@ void usb_pen_x_report(usb_pen_iface_t role, const uint8_t *d, size_t len) {
   }
 }
 
+void usb_pen_x_mouse_speed_reload(void) {
+  char speed[8] = "";
+  if (x_devset_get("mouse_speed", speed, sizeof(speed)) < 0) speed[0] = '\0'; // NVS: outside the critical section
+  uint8_t q = usb_mouse_speed(speed);
+  taskENTER_CRITICAL(&mux);
+  cursor_check();
+  usb_mouse_set_speed(&cursor.cur, q);
+  taskEXIT_CRITICAL(&mux);
+}
+
 void usb_pen_x_mouse_attach(uint16_t vid, uint16_t pid) {
   usb_dev_log_kind(vid, pid, "mouse");
+  usb_pen_x_mouse_speed_reload();
   usb_cursor_out_t o;
   taskENTER_CRITICAL(&mux);
   cursor_check();
