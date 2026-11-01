@@ -27,12 +27,14 @@ unsigned ble_share_duty(ble_share_scan_t s);
 typedef enum {
   NET_UP_ALREADY, // the station is connected
   NET_UP_NO_SAVED, // no saved network
-  NET_UP_5GHZ, // the saved network is 5 GHz: the modem has no HTTP client for apps
+  NET_UP_5GHZ, // the saved network is 5 GHz and the modem is missing (or not allowed: the Wi-Fi page needs the S3)
   NET_UP_JOIN, // join the saved 2.4 GHz network
+  NET_UP_MODEM, // the saved network is 5 GHz: the ESP32-C5 modem joins it, apps' HTTP goes through it
 } net_up_step_t;
 
 typedef struct {
   bool connected, saved, is5ghz;
+  bool modem; // the modem answers and may be used (apps' net_up and http_request; not the Wi-Fi page)
 } net_up_state_t;
 
 net_up_step_t net_up_step(net_up_state_t s);
@@ -48,6 +50,7 @@ typedef struct {
   int wl_status, rssi;
   bool ble_on, kbd_connected;
   uint32_t internal_free;
+  bool modem_joined; // NET_UP_MODEM: the modem had to join (false: it was on the network already)
 } net_up_report_t;
 
 // The one log line per net_up call: "Net: up in N ms ..." or "Net: failed: <reason> ..."; returns its length

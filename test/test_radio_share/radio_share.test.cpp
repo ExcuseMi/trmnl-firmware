@@ -67,6 +67,28 @@ void test_log_line_truncates_safely() {
   TEST_ASSERT_EQUAL(15, strlen(b));
 }
 
+// The owner's X (2026-11-01): "Xena" saved as 5 GHz, TRMNL's refresh worked over the modem, apps saw "No Wi-Fi network"
+void test_saved_5ghz_with_modem_goes_through_the_modem() {
+  TEST_ASSERT_EQUAL(NET_UP_MODEM, net_up_step({false, true, true, true}));
+  TEST_ASSERT_EQUAL(NET_UP_5GHZ, net_up_step({false, true, true, false})); // modem missing, or the Wi-Fi page
+  TEST_ASSERT_EQUAL(NET_UP_JOIN, net_up_step({false, true, false, true})); // 2.4 GHz: the S3 path, modem or not
+  TEST_ASSERT_EQUAL(NET_UP_ALREADY, net_up_step({true, true, false, true}));
+  TEST_ASSERT_EQUAL(NET_UP_NO_SAVED, net_up_step({false, false, false, true}));
+}
+
+void test_log_line_names_the_modem_path() {
+  char b[160];
+  net_up_report_t r = {NET_UP_MODEM, true, 4100, 0, -58, false, false, 90000, true};
+  net_up_log_line(b, sizeof(b), &r);
+  TEST_ASSERT_EQUAL_STRING("Net: up in 4100 ms (modem 5 GHz, joined, rssi -58, ble off)", b);
+  r.modem_joined = false;
+  net_up_log_line(b, sizeof(b), &r);
+  TEST_ASSERT_NOT_NULL(strstr(b, "modem 5 GHz, already"));
+  r.up = false;
+  net_up_log_line(b, sizeof(b), &r);
+  TEST_ASSERT_NOT_NULL(strstr(b, "Net: failed: modem could not join"));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_connecting_a_keyboard_leaves_wifi_its_share);
@@ -78,5 +100,7 @@ int main() {
   RUN_TEST(test_log_line_up);
   RUN_TEST(test_log_line_failed_names_reason_status_rssi_ble_and_ram);
   RUN_TEST(test_log_line_truncates_safely);
+  RUN_TEST(test_saved_5ghz_with_modem_goes_through_the_modem);
+  RUN_TEST(test_log_line_names_the_modem_path);
   return UNITY_END();
 }

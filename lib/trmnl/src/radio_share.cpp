@@ -14,7 +14,7 @@ unsigned ble_share_duty(ble_share_scan_t s) { return s.itvl ? (unsigned)s.window
 net_up_step_t net_up_step(net_up_state_t s) {
   if (s.connected) return NET_UP_ALREADY;
   if (!s.saved) return NET_UP_NO_SAVED;
-  if (s.is5ghz) return NET_UP_5GHZ;
+  if (s.is5ghz) return s.modem ? NET_UP_MODEM : NET_UP_5GHZ;
   return NET_UP_JOIN;
 }
 
@@ -23,7 +23,8 @@ bool net_up_modem_sleep(bool ble_on) { return ble_on; }
 static const char *reason(net_up_step_t step) {
   switch (step) {
   case NET_UP_NO_SAVED: return "no saved network";
-  case NET_UP_5GHZ: return "saved network is 5 GHz (no app HTTP on the modem)";
+  case NET_UP_5GHZ: return "saved network is 5 GHz (modem not available)";
+  case NET_UP_MODEM: return "modem could not join the 5 GHz network";
   case NET_UP_JOIN: return "join failed";
   case NET_UP_ALREADY: break;
   }
@@ -33,7 +34,10 @@ static const char *reason(net_up_step_t step) {
 size_t net_up_log_line(char *buf, size_t len, const net_up_report_t *r) {
   const char *ble = !r->ble_on ? "ble off" : r->kbd_connected ? "ble on, keyboard connected" : "ble on, no keyboard";
   int n;
-  if (r->up) {
+  if (r->up && r->step == NET_UP_MODEM) {
+    n = snprintf(buf, len, "Net: up in %lu ms (modem 5 GHz, %s, rssi %d, %s)", (unsigned long)r->ms,
+                 r->modem_joined ? "joined" : "already", r->rssi, ble);
+  } else if (r->up) {
     n = snprintf(buf, len, "Net: up in %lu ms (%s, rssi %d, %s)", (unsigned long)r->ms,
                  r->step == NET_UP_ALREADY ? "already" : "joined", r->rssi, ble);
   } else {
