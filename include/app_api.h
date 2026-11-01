@@ -218,11 +218,13 @@ typedef union {
 #define APP_PEN_MODE_STANDARD 2 // the tablet's standard report: pen, pressure, tilt; no tablet buttons
 #define APP_PEN_MODE_MOUSE 3 // a USB mouse: left button the tip (pressure fixed), right BARREL, middle BARREL2; no tilt, no keys
 
+#define APP_PEN_INFO_MOUSE 0x0001 // a USB mouse is attached too (with a tablet: it drives the cursor while the pen is out of range)
+
 typedef struct {
   uint16_t vid, pid; // the tablet's USB ids, 0 0 when none
   uint8_t mode; // APP_PEN_MODE_*
   uint8_t key_count; // tablet buttons that can come as PEN_KEY (8 on the Deco 01 V2 in full mode, else 0)
-  uint16_t reserved;
+  uint16_t flags; // APP_PEN_INFO_*
   uint32_t width_um, height_um; // the active area in micrometres (its aspect ratio), 0 0 unknown
   uint32_t dropped; // pen events not delivered since pen_enable (the app did not read; moves are merged first)
 } app_pen_info_t;
