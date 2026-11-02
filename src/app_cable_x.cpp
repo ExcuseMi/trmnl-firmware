@@ -146,8 +146,9 @@ bool app_cable_x_finish(char *path, unsigned len) {
 
 bool app_cable_x_command(const char *line) { return evlog_serial_command(line) || app_storage_serial_command(line); }
 
+// Serial was begun by bootEarly before this task starts (test_serial_begin): a begin() here raced it on the other core
+// and installed a second HWCDC interrupt
 static void cable_task(void *) {
-  Serial.begin(115200);
   app_cable_line_t line;
   app_cable_line_init(&line);
   while (true) {

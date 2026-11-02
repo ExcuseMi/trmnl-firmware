@@ -18,6 +18,7 @@
 
 #include "app_receive.h"
 #include "evlog.h"
+#include "serial_out_hw.h"
 #include "webshare.h" // webshare_fs_root
 
 #define RECEIVE_IDLE_MS (10u * 60u * 1000u) // no upload started for this long: back to the menu
@@ -28,8 +29,8 @@ void apps_reply(const char *fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(line, sizeof(line), fmt, ap);
   va_end(ap);
-  Serial.printf("TAPP %s\n", line);
-  Serial.flush();
+  // paced, no flush(): HWCDC's flush() drops the whole TX ring after 100 ms without progress (serial_out.h)
+  serial_out_printf("TAPP %s\n", line);
 }
 
 #define KEEP_TAIL 8 // bytes of an over-long line kept (the start of "TAPP " may be among them)

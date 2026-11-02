@@ -24,6 +24,7 @@
 #ifdef BOARD_TRMNL_X
 #include <Wire.h>
 #include <apps.h>
+#include "app_cable_x.h"
 #include "serial_watch_hw.h"
 #include "usb_port_role.h"
 #include "app_storage_x.h"
@@ -75,6 +76,7 @@ uint32_t bootEarly(void) {
   Serial.begin(115200);
   Log.begin(LOG_LEVEL_INFO, &Serial);
   serial_watch_start(); // HWCDC can stop sending for good while RX works (serial_watch.h)
+  app_cable_x_start(); // apps over the USB cable while the X is awake; after Serial.begin (test_serial_begin)
 #endif
   Log_info("BL init success");
   return init_time;
