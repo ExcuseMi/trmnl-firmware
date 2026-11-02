@@ -162,9 +162,11 @@ void test_no_keyboard_probe_ends_and_retries_later() {
   TEST_ASSERT_EQUAL(USB_PORT_RETRY_MS, host_after(USB_PORT_RETRY_MS * 2, true, USB_POWER_NO, false));
 }
 
-// A removal keeps host mode (boost on) for USB_PORT_REJOIN_MS: a tablet that dropped off mid-drawing and enumerates
-// again is back within it (2026-11-02: device mode at once, the next probe 25 to 50 s later); else device mode
-void test_keyboard_removed_mid_typing_waits_for_it_then_gives_device_mode() {
+// A removal keeps host mode (boost on) while the app wants the port: a tablet that dropped off mid-drawing enumerates
+// again as soon as it is back, with no stop and start of the USB stack in between (fw-usb25 and fw-lag27, 2026-11-02:
+// the 2 s wait ended in device mode, the next probe's stop asserted in ESP-IDF's ext_hub.c with the hub mid-change,
+// and the tablet was dead until a restart). Only the app ending (or outside power) ends host mode then.
+void test_keyboard_removed_mid_typing_keeps_host_mode_until_the_app_ends() {
   run(1000, true, USB_POWER_NO, true);
   run(200, true, USB_POWER_NO, true); // well inside the probe time: only the removal can end host mode
   TEST_ASSERT_EQUAL(USB_PORT_HOST, p.mode);
@@ -172,9 +174,14 @@ void test_keyboard_removed_mid_typing_waits_for_it_then_gives_device_mode() {
   TEST_ASSERT_EQUAL(USB_PORT_HOST, run(0, true, USB_POWER_NO, false)); // the first poll without it: still host
   TEST_ASSERT_EQUAL(USB_WHY_REJOIN, p.why);
   TEST_ASSERT_TRUE(p.boost);
-  TEST_ASSERT_EQUAL(USB_PORT_HOST, run(USB_PORT_REJOIN_MS - 2 * USB_PORT_POLL_MS, true, USB_POWER_NO, false));
-  TEST_ASSERT_EQUAL(USB_PORT_DEVICE, run(2 * USB_PORT_POLL_MS, true, USB_POWER_NO, false)); // not back: device mode
-  TEST_ASSERT_EQUAL(USB_WHY_NO_KEYBOARD, p.why);
+  TEST_ASSERT_EQUAL(USB_PORT_HOST, run(120000, true, USB_POWER_NO, false)); // two minutes without it: still host
+  TEST_ASSERT_EQUAL(USB_WHY_REJOIN, p.why);
+  TEST_ASSERT_TRUE(p.boost);
+  TEST_ASSERT_EQUAL(USB_PORT_HOST, run(1000, true, USB_POWER_NO, true)); // back: drawing goes on
+  TEST_ASSERT_EQUAL(USB_WHY_KEYBOARD, p.why);
+  run(1000, true, USB_POWER_NO, false);
+  TEST_ASSERT_EQUAL(USB_PORT_DEVICE, run(0, false, USB_POWER_NO, false)); // the app ended: device mode
+  TEST_ASSERT_FALSE(p.boost);
 }
 
 void test_a_dropped_tablet_back_within_the_rejoin_time_keeps_host_mode() {
@@ -396,7 +403,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_a_power_blip_restarts_the_second);
   RUN_TEST(test_keyboard_keeps_host_mode);
   RUN_TEST(test_no_keyboard_probe_ends_and_retries_later);
-  RUN_TEST(test_keyboard_removed_mid_typing_waits_for_it_then_gives_device_mode);
+  RUN_TEST(test_keyboard_removed_mid_typing_keeps_host_mode_until_the_app_ends);
   RUN_TEST(test_a_dropped_tablet_back_within_the_rejoin_time_keeps_host_mode);
   RUN_TEST(test_host_mode_ends_with_the_boost_off_last);
   RUN_TEST(test_charger_plugged_in_while_host_gives_device_mode_at_once);

@@ -9,7 +9,7 @@ import time
 import littlefs
 
 import flashfs
-from test_apps import CRASHED, MAIN_MENU, apps_menu, asleep, choose, count_logs, idle, long_press, must_log, since
+from test_apps import NEVER, CRASHED, MAIN_MENU, apps_menu, asleep, choose, count_logs, idle, long_press, must_log, pick_app, since
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "apps"))
 import upload  # noqa: E402
@@ -45,7 +45,7 @@ def receive_mode(sim, apps):
     must_log(sim, r"menu_show_screen end", start)
     choose(sim, MAIN_MENU, "Apps...")
     must_log(sim, r"menu_show_screen end", start)
-    choose(sim, apps_menu(apps), "Receive over USB...")
+    choose(sim, apps_menu(apps), "Receive over USB")
     must_log(sim, r"Apps: waiting for an upload on the USB serial port", start)
     return SimPort(sim)
 
@@ -62,7 +62,7 @@ def back_to_sleep(sim):
     """Ends the app; the sim saves its flash file when the device sleeps"""
     t = since(sim)
     # a touch right after the one that chose the app reads as that one, held: let the bar see it up first
-    sim.wait(1, console=r"never", since=t)
+    sim.wait(1, console=NEVER, since=t)
     idle(sim)
     long_press(sim)
     must_log(sim, r"Apps: hello ended with 0", t)
@@ -124,7 +124,7 @@ def test_an_app_sent_over_usb_runs_and_the_rest_of_the_file_system_stays(device,
     must_log(sim, r"Apps: received /apps/big.elf, %d bytes" % len(big), 0)
     stop_receiving(sim)
     # the Apps submenu lists it now: start it from there
-    choose(sim, apps_menu(["big", "hello"]), "hello")
+    pick_app(sim, ["big", "hello"], "hello")
     must_log(sim, r"app hello: hello: run 1", 0)
     back_to_sleep(sim)
     files = files_on_flash(sim.flash)
@@ -171,7 +171,7 @@ def test_a_bad_or_cut_off_upload_keeps_the_old_app(device, elfs):
     # still answers a good one afterwards
     upload.upload("second.elf", elfs["hello"], port.write, port.read_reply)
     stop_receiving(sim)
-    choose(sim, apps_menu(["hello", "second"]), "hello")
+    pick_app(sim, ["hello", "second"], "hello")
     must_log(sim, r"app hello: hello: run 1", 0)
     back_to_sleep(sim)
     files = files_on_flash(sim.flash)

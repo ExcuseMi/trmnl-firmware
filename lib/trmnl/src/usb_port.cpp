@@ -96,14 +96,14 @@ usb_port_mode_t usb_port_step(usb_port_t *p, uint32_t now, const usb_port_input_
       p->why = USB_WHY_KEYBOARD;
       return p->mode;
     }
-    if (p->why == USB_WHY_KEYBOARD) { // removed: a moment to enumerate again (a tablet that dropped off)
+    if (p->why == USB_WHY_KEYBOARD) { // removed: host mode stays for it to enumerate again (a tablet that dropped off)
       p->why = USB_WHY_REJOIN;
       p->gone_since = now;
       return p->mode;
     }
-    if (p->why == USB_WHY_REJOIN && (uint32_t)(now - p->gone_since) < USB_PORT_REJOIN_MS) return p->mode;
-    // the removed one did not come back, or the probe found none
-    if (p->why == USB_WHY_REJOIN || (uint32_t)(now - p->host_since) >= USB_PORT_PROBE_MS) {
+    // while the app wants the port: no stop and start of the stack (usb_port.h USB_WHY_REJOIN)
+    if (p->why == USB_WHY_REJOIN) return p->mode;
+    if ((uint32_t)(now - p->host_since) >= USB_PORT_PROBE_MS) { // the probe found none
       p->retry_wait = true;
       p->retry_at = now + USB_PORT_RETRY_MS;
       return device(p, USB_WHY_NO_KEYBOARD);

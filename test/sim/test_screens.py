@@ -5,7 +5,7 @@ The touch bar is driven through the sim's IQS323 (POST /touch: its status regist
 hardware uses. The presses come right after the screen or app starts, without waiting for the panel: the middle tap
 that chose it was read by the menu's last mode switch and never published, so on 68248ca the next middle press
 showed no start and was swallowed (no tap, no long press: the owner's dead touch bar in apps)."""
-from test_apps import CRASHED, apps_menu, asleep, choose, count_logs, idle, keys, long_press, MAIN_MENU, must_log, \
+from test_apps import NEVER, CRASHED, apps_menu, asleep, choose, count_logs, idle, keys, long_press, MAIN_MENU, must_log, \
     since, start_app
 
 
@@ -106,7 +106,7 @@ def test_receive_over_usb_ends_on_a_long_press(device, elfs):
     must_log(sim, r"menu_show_screen end", start)
     choose(sim, MAIN_MENU, "Apps...")
     must_log(sim, r"menu_show_screen end", start)
-    choose(sim, apps_menu(["hello"]), "Receive over USB...")
+    choose(sim, apps_menu(["hello"]), "Receive over USB")
     must_log(sim, r"Apps: waiting for an upload on the USB serial port", start)
     t = since(sim)
     long_press(sim)
@@ -117,11 +117,13 @@ def test_an_app_no_input_reached_is_not_resumed(device, elfs):
     sim = device({"/apps/hello.elf": elfs["hello"]})
     start = start_app(sim, ["hello"], "hello")
     must_log(sim, r"app hello: hello: run 1", start)
-    assert not sim.wait(8, console=r"never", since=start).get("ok")  # past APP_RESUME_STARTED_MS, no input
+    assert not sim.wait(8, console=NEVER, since=start).get("ok")  # past APP_RESUME_STARTED_MS, no input
     assert sim.prefs().get("app_resume") == "1", sim.prefs()
     t = since(sim)
     sim.api("POST", "/reset")
-    must_log(sim, r"Apps: not resuming /apps/hello.elf: no touch or key reached it", t, 120)
+    # owner 2026-11-02 (50a9ec7): a restart goes to the home screen whatever reached the app; the "no touch or key
+    # reached it" rule is for a wake from deep sleep, which the sim has not
+    must_log(sim, r"Apps: restart \(\d+\): home screen, no app resumed", t, 120)
     asleep(sim)
     assert count_logs(sim, r"Apps: resuming") == 0
     assert count_logs(sim, r"hello: run 2") == 0
@@ -135,7 +137,7 @@ def test_a_serial_command_clears_the_resume(device, elfs):
     t = since(sim)
     keys(sim, b"x")  # input reached it: due for resuming
     must_log(sim, r"hello: key down 'x'", t)
-    assert not sim.wait(8, console=r"never", since=start).get("ok")
+    assert not sim.wait(8, console=NEVER, since=start).get("ok")
     assert sim.prefs().get("app_resume") == "1", sim.prefs()
     t = since(sim)
     sim.api("POST", "/serial", b"TAPP NORESUME\n")
@@ -157,7 +159,7 @@ def test_a_touch_bar_reset_while_an_app_runs_is_recovered(device, elfs):
     sim.api("POST", "/faults", {"touch_bar": "reset"})
     must_log(sim, r"IQS323 Task: Unexpected reset detected", t)
     must_log(sim, r"IQS323_INIT_DONE", t)
-    sim.wait(3, console=r"never", since=t)
+    sim.wait(3, console=NEVER, since=t)
     assert count_logs(sim, r"IQS323 Task: Unexpected reset detected") <= 2, "reinit loop"
     t = since(sim)
     long_press(sim)
@@ -189,7 +191,7 @@ def test_receive_over_usb_shows_the_tap_hint_pills(device, elfs):
     must_log(sim, r"menu_show_screen end", start)
     choose(sim, MAIN_MENU, "Apps...")
     must_log(sim, r"menu_show_screen end", start)
-    choose(sim, apps_menu(["hello"]), "Receive over USB...")
+    choose(sim, apps_menu(["hello"]), "Receive over USB")
     must_log(sim, r"Apps: waiting for an upload on the USB serial port", start)
     idle(sim)
     import io

@@ -29,6 +29,8 @@ def count_logs(sim, regex):
 
 
 CRASHED = r"Guru Meditation|rst:0x(3|c) "  # a panic, a software restart
+# a console regex that never matches, for a plain wait: r"never" matched "closes after 10 min idle (0: never)"
+NEVER = r"NEVER-MATCHES-7f3a9c"
 
 
 def asleep(sim, timeout=120):
@@ -86,13 +88,36 @@ def start_app(sim, apps, name):
     must_log(sim, r"menu_show_screen end", start)
     choose(sim, MAIN_MENU, "Apps...")
     must_log(sim, r"menu_show_screen end", start)
-    choose(sim, apps_menu(apps), name)
+    if name in APPS_MENU:  # a screen of the submenu itself (Install via Wi-Fi)
+        choose(sim, APPS_MENU, name)
+    else:
+        pick_app(sim, apps, name)
     return start
 
 
+def pick_app(sim, apps, name):
+    """On the Apps submenu: "Open an app", then `name` in the grid launcher (menu_apps_pick): no log line per move;
+    the first tile is selected, the apps in MRU order (the ones opened on this device first, latest first, then the
+    rest sorted: app_mru_order); a right tap moves one tile, a middle tap opens the selected one"""
+    choose(sim, APPS_MENU, "Open an app")
+    sim.wait(2, console=NEVER)  # the grid's first draw: a tap during it is lost, and there is no log line to follow
+    mru = getattr(sim, "mru", [])
+    order = [a for a in mru if a in apps] + sorted(a for a in apps if a not in mru)
+    for _ in range(order.index(name)):
+        idle(sim)
+        sim.touch("right")
+    idle(sim)
+    sim.touch("center")
+    sim.mru = [name] + [a for a in mru if a != name]
+
+
+# The Apps submenu (src/menu.cpp MENU_SCREEN_APPS) without a Bluetooth keyboard paired
+APPS_MENU = ["Open an app", "Receive over USB", "Install via Wi-Fi", "Remove an app", "Storage", "Back"]
+
+
 def apps_menu(apps):
-    """The Apps submenu's items with `apps` in /apps"""
-    return sorted(apps) + ["Receive over USB...", "Install via Wi-Fi", "Back"]
+    """The Apps submenu's items; `apps` (the names in /apps) are behind "Open an app" since the grid launcher"""
+    return APPS_MENU
 
 
 def long_press(sim):
@@ -180,7 +205,7 @@ def test_a_running_app_is_not_resumed_after_a_restart(device, elfs):
     t = since(sim)
     keys(sim, b"a")  # input reached it: before 2026-11-02 that made it due for resuming
     must_log(sim, r"hello: key down 'a'", t)
-    r = sim.wait(30, console=r"never", since=start)  # let it run past APP_RESUME_STARTED_MS (5 s)
+    r = sim.wait(30, console=NEVER, since=start)  # let it run past APP_RESUME_STARTED_MS (5 s)
     assert not r.get("ok")
     assert sim.prefs().get("app_resume") == "1", sim.prefs()
     t = since(sim)

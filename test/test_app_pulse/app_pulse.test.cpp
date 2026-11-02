@@ -35,7 +35,7 @@ void test_cpu_line_shows_the_four_busiest_then_the_idle_tasks() {
   app_pulse_task_t t[7] = {{"IDLE0", 440}, {"app", 380}, {"usb_lib", 30}, {"IDLE1", 510}, {"ink", 290}, {"iqs323_task", 60}, {"cable", 0}};
   char out[160];
   TEST_ASSERT_TRUE(app_pulse_cpu_line(t, 7, 2000, out, sizeof(out)));
-  TEST_ASSERT_EQUAL_STRING("cpu % app 38 ink 29 iqs323_task 6 usb_lib 3 IDLE1 51 IDLE0 44", out);
+  TEST_ASSERT_EQUAL_STRING("cpu % app 19 ink 15 iqs323_task 3 usb_lib 2 IDLE1 26 IDLE0 22", out);
   TEST_ASSERT_TRUE(strlen(out) <= EVLOG_TEXT_MAX);
 }
 
@@ -50,7 +50,7 @@ void test_cpu_line_with_many_long_names_fits_the_record() {
   char out[200];
   TEST_ASSERT_TRUE(app_pulse_cpu_line(t, APP_PULSE_TASKS, 1000u * APP_PULSE_TASKS, out, sizeof(out)));
   TEST_ASSERT_TRUE(strlen(out) <= EVLOG_TEXT_MAX);
-  TEST_ASSERT_NOT_NULL(strstr(out, "IDLE0 8"));
+  TEST_ASSERT_NOT_NULL(strstr(out, "IDLE0 4"));
 }
 
 void test_cpu_line_without_run_time_gives_nothing() {

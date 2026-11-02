@@ -43,8 +43,6 @@ const char *usb_role_str(usb_role_t role);
 // the app asks again. `boost` says which host mode it is.
 
 #define USB_PORT_POLL_MS  100
-// A removed device (a tablet that dropped off the bus mid-drawing) gets this long in host mode to come back
-#define USB_PORT_REJOIN_MS 2000
 // config/apps.json: USB_PORT_CLEAR_MS no input power this long before the boost may go on, USB_PORT_PROBE_MS host
 // mode without a keyboard: back to device mode, USB_PORT_RETRY_MS then this long in device mode before the next probe,
 // USB_PORT_OUTSIDE_PROBE_MS host mode with outside power without a device: back to serial
@@ -62,7 +60,8 @@ typedef enum {
   USB_WHY_PROBING, // host mode, waiting for a keyboard
   USB_WHY_KEYBOARD, // host mode, a keyboard is there
   USB_WHY_NO_KEYBOARD, // the probe found none, or it was removed: waiting USB_PORT_RETRY_MS
-  USB_WHY_REJOIN, // host mode, the device was removed: waiting USB_PORT_REJOIN_MS for it to enumerate again
+  USB_WHY_REJOIN, // host mode, the device was removed: it enumerates again when back; the stack is not stopped and
+                  // started for it while the app wants the port (a stop with the hub mid-change asserted in ext_hub.c)
   USB_WHY_PORT_TAKEN, // another role (the USB drive) has the PHY
   USB_WHY_OUTSIDE_PROBING, // host mode, boost off, outside power: waiting for a device (a hub's or an adapter's)
   USB_WHY_OUTSIDE_DEVICE, // host mode, boost off, outside power: a device is there

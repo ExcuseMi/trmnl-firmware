@@ -32,6 +32,6 @@ typedef struct {
 // the ink task's runs/requests and average; false when nothing happened in the window (no line then)
 bool app_pulse_pen_line(const app_pulse_counts_t *c, char *out, size_t cap);
 
-// "cpu % app 38 ink 29 iqs323_task 6 usb_lib 3 IDLE0 44 IDLE1 51": the four busiest tasks by share of `total` (the
-// sum over every task, two cores: up to 200), then the idle tasks. `t` is reordered. False when total is 0.
+// "cpu % app 19 ink 15 iqs323_task 3 usb_lib 2 IDLE1 26 IDLE0 22": the four busiest tasks by share of `total` (the
+// window's wall time: each core's tasks add up to 100), then the idle tasks. `t` is reordered. False when total is 0.
 bool app_pulse_cpu_line(app_pulse_task_t *t, int n, uint32_t total, char *out, size_t cap);

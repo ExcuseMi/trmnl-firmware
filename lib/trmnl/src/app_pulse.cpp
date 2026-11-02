@@ -18,7 +18,8 @@ bool app_pulse_pen_line(const app_pulse_counts_t *c, char *out, size_t cap) {
 
 static bool idle_task(const app_pulse_task_t *t) { return strncmp(t->name, "IDLE", 4) == 0; }
 
-static unsigned share(uint32_t run, uint32_t total) { return (unsigned)(((uint64_t)run * 200u + total / 2) / total); }
+// `total` is the window's wall time (FreeRTOS' total run time counter): each core's tasks add up to 100
+static unsigned share(uint32_t run, uint32_t total) { return (unsigned)(((uint64_t)run * 100u + total / 2) / total); }
 
 bool app_pulse_cpu_line(app_pulse_task_t *t, int n, uint32_t total, char *out, size_t cap) {
   if (!t || n <= 0 || !total || !out || !cap) return false;

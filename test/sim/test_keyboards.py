@@ -2,12 +2,12 @@
 the charger's input power on the right pin, keeps device mode while powered and for the first second on battery.
 The sim has no USB-OTG controller (usb_host_install asserts on its ID register) and no keyboard: host mode itself
 is covered by test_usb_port (the rules) and the device check."""
-from test_apps import CRASHED, asleep, count_logs, idle, keys, long_press, must_log, since, start_app
+from test_apps import NEVER, CRASHED, asleep, count_logs, idle, keys, long_press, must_log, since, start_app
 
 
 def exit_app(sim, name):
     t = since(sim)
-    sim.wait(1, console=r"never", since=t)  # the touch that chose the app is up
+    sim.wait(1, console=NEVER, since=t)  # the touch that chose the app is up
     idle(sim)
     long_press(sim)
     must_log(sim, r"Apps: %s ended with 0" % name, t)

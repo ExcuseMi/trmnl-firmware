@@ -448,7 +448,7 @@ static void log_device_left(void) {
     expander_unlock();
   }
   float v = battery().readVoltage();
-  evlog_add("USB keys: device left in host mode, waiting %d ms: batt %d mV, boost pin %d, input power %d", USB_PORT_REJOIN_MS,
+  evlog_add("USB keys: device left in host mode, waiting for it: batt %d mV, boost pin %d, input power %d",
             v < 0 ? -1 : (int)(v * 1000.0f + 0.5f), otg, pg);
 }
 

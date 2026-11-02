@@ -71,7 +71,8 @@ static void window_lines(void) {
   for (int i = 0; i < n; i++) { // the window's run time: now minus the base of the same name
     for (int j = 0; j < base_n; j++) {
       if (strcmp(now[i].name, base[j].name) == 0) {
-        now[i].run -= base[j].run; // unsigned: right across the counter's wrap
+        // a task of that name made again in the window (the USB host's on a restart of host mode) counts from 0
+        if (now[i].run >= base[j].run) now[i].run -= base[j].run;
         break;
       }
     }
