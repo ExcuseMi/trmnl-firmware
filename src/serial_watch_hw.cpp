@@ -12,6 +12,7 @@
 #include <trmnl_log.h>
 
 #include "evlog.h"
+#include "serial_log_hw.h"
 #include "usb_port_role.h"
 
 static TaskHandle_t task;
@@ -26,23 +27,31 @@ static void kick(void) {
 static void watch(void *) {
   serial_watch_t w;
   serial_watch_init(&w);
+  bool ours = false; // the current stall had the FIFO free (our side)
   while (true) {
     vTaskDelay(pdMS_TO_TICKS(SERIAL_WATCH_POLL_MS));
+    serial_log_pump(); // log text that waited for a reader (console_out.h)
     // the PHY with the USB drive or keyboard host: no serial port to watch (usb_port_role.h)
     bool serial = usb_port_role() == USB_ROLE_SERIAL;
     int free = Serial.availableForWrite();
     serial_watch_act_t a = serial_watch_step(&w, millis(), free, serial && usb_serial_jtag_is_connected());
     if (a == SERIAL_WATCH_KICK) {
       // the second kick (2 s without progress) is a real stall; FIFO free = HWCDC's interrupt was masked (a kick
-      // fixes that), FIFO full = the host takes no IN packets (its side)
+      // fixes that), FIFO full = the host takes no IN packets (its side: no program reads the port). Only ours goes
+      // into the event log; nobody reading is counted by console_out.h ("console: N bytes dropped ...") instead
       if (w.kicks == 2) {
-        evlog_add("Serial: output stalled, %d bytes waiting, FIFO %s, IN ep1 state %u", w.max_free - free,
-                  usb_serial_jtag_ll_txfifo_writable() ? "free" : "full", (unsigned)USB_SERIAL_JTAG.in_ep1_st.in_ep1_state);
+        ours = usb_serial_jtag_ll_txfifo_writable();
+        if (ours) {
+          evlog_add("Serial: output stalled, %d bytes waiting, FIFO free, IN ep1 state %u", w.max_free - free,
+                    (unsigned)USB_SERIAL_JTAG.in_ep1_st.in_ep1_state);
+        }
       }
       kick();
     } else if (a == SERIAL_WATCH_RESUMED) {
       Log_info("Serial: output resumed after %u ms stalled, %u kicks", (unsigned)w.stall_ms, (unsigned)w.resumed_kicks);
-      if (w.resumed_kicks >= 2) {
+      bool logged = ours;
+      ours = false;
+      if (w.resumed_kicks >= 2 && logged) {
         evlog_add("Serial: output resumed after %u ms stalled, %u kicks", (unsigned)w.stall_ms,
                   (unsigned)w.resumed_kicks);
       }
