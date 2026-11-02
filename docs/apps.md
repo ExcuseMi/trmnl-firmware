@@ -480,12 +480,12 @@ flash a file system image to a real X (it replaces those files); `test/sim/flash
 | Step | Do |
 |---|---|
 | on the X | nothing: awake with the cable in (see "Update over the cable"). The menu way still works: Apps..., Receive over USB... (any tap or 2 min idle ends it) |
-| on the computer | `python3 apps/upload.py /dev/ttyACM0 apps/build/hello.elf` (venv with `pyserial`); prints `sent hello.elf` |
+| on the computer | `python3 apps/upload.py /dev/ttyACM0 apps/build/hello.elf` (Linux or WSL, no packages); prints `sent hello.elf` |
 
 | Protocol (`lib/trmnl/include/app_upload.h`) | |
 |---|---|
 | header | `TAPP PUT <name>.elf <size> <crc32 hex>`; refused: bad name, 0 bytes, over 2 MB, more than the free space less 16 KB |
-| noise | the X skips bytes before `TAPP ` on a line (CR/LF both fine) and answers nothing to a line without it; a bad header is answered `TAPP ERR bad header: got <first 32 bytes, hex>`; upload.py opens the port with DTR/RTS low and sends the header a second time if no READY comes |
+| noise | the X skips bytes before `TAPP ` on a line (CR/LF both fine) and answers nothing to a line without it; a bad header is answered `TAPP ERR bad header: got <first 32 bytes, hex>`; upload.py opens the port without a restart (DTR and RTS cleared in one request, no HUPCL; `test/upload_py/test_quiet_open.py`) and sends the header a second time if no READY comes |
 | data | 64-byte blocks, each answered `TAPP ACK <bytes>` (one USB packet; the serial RX buffer drops what does not fit) |
 | end | `TAPP OK <name>.elf`, or `TAPP ERR short` (no byte for 5 s) / `bad crc` / `write failed`: the old app stays |
 | writes | `/apps/.upload.tmp`; after size and CRC match, `app_install_commit` (the one install path, shared with Install via Wi-Fi): the loader's ELF check (`TAPP ERR refused: <reason>`), the old app kept as `.bak` until the new one started, then the rename. A leftover temp file is removed at the next start |

@@ -6,9 +6,10 @@ The X only has to be awake with the cable in: on a TRMNL screen, in a menu or wi
 (touch the bar first if it sleeps; this script keeps asking for 30 s). Not running: installed at once. The same app
 running: it is asked to exit, replaced and started again. Another app running: it keeps running. Only
 /apps/<name>.elf is written; the file system with TRMNL's cached screens stays. Protocol:
-lib/trmnl/include/app_upload.h. Needs pyserial (in a venv).
+lib/trmnl/include/app_upload.h. Linux or WSL only (termios); no pyserial: its open restarts the X.
 """
 import os
+import struct
 import sys
 import time
 import zlib
@@ -54,38 +55,87 @@ def expect(line, want):
         raise UploadError(line)
 
 
-def serial_port(path):
-    import serial  # pyserial
+def open_quiet(path):
+    """The port as a raw, non-blocking descriptor, the X not restarted.
 
-    # DTR and RTS low BEFORE the open: the X's USB-Serial/JTAG resets on the usual DTR/RTS toggle at open
-    port = serial.Serial()
-    port.port = path
-    port.baudrate = 115200
-    port.timeout = 0.2
-    port.dtr = False
-    port.rts = False
-    port.open()
-    time.sleep(SETTLE_S)
+    The X's USB Serial/JTAG restarts (rst:0x15) when the host sets RTS with DTR clear, the state esptool uses for
+    EN low. Linux raises both lines at the open; pyserial then clears DTR and RTS in two calls, and the state
+    between them is that reset (owner's X 2026-11-02: every upload restarted it). Here both lines are cleared in
+    ONE request, and HUPCL is cleared so the close leaves them alone."""
+    import fcntl
+    import termios
+    import tty
+
+    fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    try:
+        fcntl.ioctl(fd, termios.TIOCMBIC, struct.pack("I", termios.TIOCM_DTR | termios.TIOCM_RTS))
+        tty.setraw(fd)
+        a = termios.tcgetattr(fd)
+        a[2] |= termios.CLOCAL | termios.CREAD
+        a[2] &= ~termios.HUPCL
+        a[4] = a[5] = termios.B115200
+        termios.tcsetattr(fd, termios.TCSANOW, a)
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
+
+
+def serial_port(path):
+    """(write, read_reply, flush_input) on the port, opened without restarting the X"""
+    import select
+
+    fd = open_quiet(path)
+    buf = bytearray()
+
+    def write(data):
+        view = memoryview(data)
+        while view:
+            try:
+                n = os.write(fd, view)
+            except BlockingIOError:
+                select.select([], [fd], [], 1.0)
+                continue
+            view = view[n:]
 
     def read_reply(timeout_s):
         end = time.time() + timeout_s
-        while time.time() < end:
-            line = port.readline().decode(errors="replace").strip()
-            if line.startswith("TAPP "):
-                return line
-        return None
+        while True:
+            while b"\n" in buf:
+                i = buf.index(b"\n")
+                line = bytes(buf[:i]).decode(errors="replace").strip()
+                del buf[:i + 1]
+                if line.startswith("TAPP "):
+                    return line
+            left = end - time.time()
+            if left <= 0:
+                return None
+            if select.select([fd], [], [], min(left, 0.2))[0]:
+                try:
+                    chunk = os.read(fd, 4096)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    raise UploadError("the port closed (the X restarted or the cable came out)")
+                buf.extend(chunk)
 
-    return port, read_reply
+    def flush_input():
+        time.sleep(SETTLE_S)
+        while select.select([fd], [], [], 0)[0] and os.read(fd, 4096):
+            pass
+        buf.clear()
+
+    return write, read_reply, flush_input
 
 
 def main(argv):
     if len(argv) < 3:
         sys.exit(__doc__)
-    port, read_reply = serial_port(argv[1])
-    port.reset_input_buffer()
+    write, read_reply, flush_input = serial_port(argv[1])
+    flush_input()
     for path in argv[2:]:
         name = os.path.basename(path)
-        upload(name, open(path, "rb").read(), port.write, read_reply)
+        upload(name, open(path, "rb").read(), write, read_reply)
         print("sent %s" % name)
 
 
