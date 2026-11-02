@@ -131,7 +131,7 @@ An app's settings typed on the phone (any language, the phone's keyboard): `sett
 
 | | |
 |---|---|
-| declare | up to 16 `app_setting_decl_t`: `key` (1..15 of A-Z a-z 0-9 _, unique), `label` (1..48 bytes UTF-8), `kind` TEXT, SECRET (bytes `min..max`, max 1..256), NUMBER (`min..max`), CHOICE (`choices` "a\|b\|c", up to 16, 256 bytes). A bad field: `APP_EINVAL`, the old form kept. Copied; gone when the app ends |
+| declare | up to 16 `app_setting_decl_t`: `key` (1..15 of A-Z a-z 0-9 _, unique), `label` (1..128 bytes UTF-8), `kind` TEXT, SECRET (bytes `min..max`, max 1..256), NUMBER (`min..max`), CHOICE (`choices` "a\|b\|c", up to 16, 256 bytes). A bad field: `APP_EINVAL`, the old form kept. Copied; gone when the app ends |
 | start | `APP_ENOENT` with nothing declared; `APP_EBUSY` while ESP-NOW holds the radio (as the files profile; a Bluetooth keyboard shares the radio with the page as before) |
 | page | one field per row (text box, password box, number box, menu), Save, the keyboard layout, the touch bar's buttons |
 | save | every sent value checked first (too long or short, broken UTF-8 or control characters, not a whole number, out of range, not one of the choices: "<label>: <why>", nothing written), then `setting_set` per changed key; an empty text removes the key. Then `APP_EVENT_SETTINGS` with `key` = values changed |

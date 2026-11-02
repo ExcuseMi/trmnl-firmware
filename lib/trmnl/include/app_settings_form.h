@@ -12,7 +12,7 @@
 
 #define ASF_FIELDS_MAX 16
 #define ASF_KEY_MAX 15 // as setting_get/set (NVS)
-#define ASF_LABEL_MAX 48
+#define ASF_LABEL_MAX 128 // 48 refused the X's own apps' forms (2026-11-02)
 #define ASF_VALUE_MAX 256 // setting_set's limit
 #define ASF_CHOICES_MAX 16
 #define ASF_CHOICES_BYTES 256 // "a|b|c" in all
@@ -37,6 +37,8 @@ typedef struct {
 // characters; an unknown kind; text/secret limits outside 0 <= min <= max <= ASF_VALUE_MAX or max 0; number min > max;
 // choice without choices, an empty or repeated choice, more than ASF_CHOICES_MAX or ASF_CHOICES_BYTES. n 0 clears
 int asf_declare(asf_form_t *form, const app_setting_decl_t *decls, uint32_t n);
+// The index of the first field asf_declare refuses (a bad field, or a key used again), -1 when all pass
+int asf_bad_field(const app_setting_decl_t *decls, uint32_t n);
 
 // The field of `key`, or -1
 int asf_find(const asf_form_t *form, const char *key);

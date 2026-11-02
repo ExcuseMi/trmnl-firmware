@@ -7,6 +7,7 @@
 #include "app_host.h"
 #include "app_settings_store.h"
 #include "app_settings_x.h"
+#include "evlog.h"
 
 static asf_form_t *form; // PSRAM, allocated at the first declare and kept (no free while the page may read)
 static SemaphoreHandle_t lock;
@@ -27,6 +28,13 @@ static bool ready(void) {
 
 int app_settings_x_declare(const app_setting_decl_t *decls, uint32_t n) {
   if (!ready()) return APP_ENOMEM;
+  int bad = n <= ASF_FIELDS_MAX ? asf_bad_field(decls, n) : (int)n;
+  if (bad >= 0) { // the app's Settings on the phone would not start: say which field (2026-11-02)
+    const char *key = decls && (uint32_t)bad < n && decls[bad].key ? decls[bad].key : "";
+    evlog_add("Settings: %s declared a field the X refuses (#%d %.15s; label 1..%d bytes, key 1..%d)", app_host.name, bad,
+              key, ASF_LABEL_MAX, ASF_KEY_MAX);
+    return APP_EINVAL;
+  }
   int rc;
   {
     form_lock l;

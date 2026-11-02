@@ -111,9 +111,32 @@ void test_bad_declarations_are_refused_and_keep_nothing() {
   TEST_ASSERT_EQUAL(-1, asf_find(&form, "name"));
 }
 
+// The labels the X's own apps declare (2026-11-02: Sketch's and Print's were over the old 48 bytes, the whole form was
+// refused and the Wi-Fi page could not start); the first bad field is named for the event log
+void test_the_apps_labels_fit_and_a_bad_field_is_named() {
+  const app_setting_decl_t apps[] = {
+      {"printer", "Printer address if it is not found (IP, IP:port or IP:port/path; the port is 631 if left out)", nullptr,
+       0, 64, APP_SETTING_TEXT},
+      {"tablet_turn", "Tablet in portrait (auto: used turned a quarter, long side up and down; off: as it lies)", "auto|off",
+       0, 0, APP_SETTING_CHOICE},
+  };
+  TEST_ASSERT_EQUAL(0, asf_declare(&form, apps, 2));
+  TEST_ASSERT_EQUAL(2, form.n);
+  TEST_ASSERT_EQUAL(-1, asf_bad_field(apps, 2));
+  char lng[ASF_LABEL_MAX + 2];
+  memset(lng, 'a', sizeof(lng) - 1);
+  lng[sizeof(lng) - 1] = '\0';
+  const app_setting_decl_t bad[] = {apps[0], {"k", lng, nullptr, 0, 8, APP_SETTING_TEXT}};
+  TEST_ASSERT_EQUAL(APP_EINVAL, asf_declare(&form, bad, 2));
+  TEST_ASSERT_EQUAL(1, asf_bad_field(bad, 2));
+  const app_setting_decl_t twice[] = {apps[0], apps[1], apps[0]};
+  TEST_ASSERT_EQUAL(2, asf_bad_field(twice, 3)); // a key used twice: the second one
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_good_values_pass);
+  RUN_TEST(test_the_apps_labels_fit_and_a_bad_field_is_named);
   RUN_TEST(test_too_long_and_too_short);
   RUN_TEST(test_bad_number);
   RUN_TEST(test_unknown_choice);

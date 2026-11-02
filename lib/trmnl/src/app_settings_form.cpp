@@ -77,15 +77,20 @@ static bool field_from(asf_field_t *f, const app_setting_decl_t *d) {
   return true;
 }
 
-int asf_declare(asf_form_t *form, const app_setting_decl_t *decls, uint32_t n) {
-  if (!form || (n && !decls) || n > ASF_FIELDS_MAX) return APP_EINVAL;
+int asf_bad_field(const app_setting_decl_t *decls, uint32_t n) {
+  if (n && !decls) return 0;
   asf_field_t one; // every field checked before the form changes (no second form in RAM)
   for (uint32_t i = 0; i < n; i++) {
-    if (!field_from(&one, &decls[i])) return APP_EINVAL;
+    if (!field_from(&one, &decls[i])) return (int)i;
     for (uint32_t j = 0; j < i; j++) {
-      if (!strcmp(decls[j].key, decls[i].key)) return APP_EINVAL;
+      if (!strcmp(decls[j].key, decls[i].key)) return (int)i;
     }
   }
+  return -1;
+}
+
+int asf_declare(asf_form_t *form, const app_setting_decl_t *decls, uint32_t n) {
+  if (!form || (n && !decls) || n > ASF_FIELDS_MAX || asf_bad_field(decls, n) >= 0) return APP_EINVAL;
   memset(form, 0, sizeof(*form));
   for (uint32_t i = 0; i < n; i++) field_from(&form->f[i], &decls[i]);
   form->n = (int)n;

@@ -372,7 +372,7 @@ typedef enum {
 
 typedef struct {
   const char *key; // setting_get/set key: 1..15 of A-Z a-z 0-9 _
-  const char *label; // shown on the phone, 1..48 bytes, any language
+  const char *label; // shown on the phone, 1..128 bytes, any language
   const char *choices; // CHOICE: "one|two|three" (up to 16, 256 bytes in all); NULL otherwise
   int32_t min, max; // TEXT, SECRET: bytes; NUMBER: the value
   uint32_t kind; // app_setting_kind_t
