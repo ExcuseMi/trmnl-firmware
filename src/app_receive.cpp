@@ -8,6 +8,8 @@
 #include <app_install.h>
 #include <app_space.h>
 #include <app_upload.h>
+#include <serial_hold.h>
+#include <serial_out.h>
 #include <esp_heap_caps.h>
 #include <trmnl_crc32.h>
 #include <apps.h>
@@ -21,6 +23,7 @@
 #include "serial_out_hw.h"
 #include "webshare.h" // webshare_fs_root
 
+#define APP_UPLOAD_STALL_MAX_MS 30000u // a TX ring that never empties still ends the upload (serial_hold.h)
 #define RECEIVE_IDLE_MS (10u * 60u * 1000u) // no upload started for this long: back to the menu
 
 void apps_reply(const char *fmt, ...) {
@@ -95,9 +98,10 @@ app_upload_result_t apps_receive_tmp(const app_upload_header_t &h) {
   if (!f) return APP_UPLOAD_WRITE_FAILED;
   apps_reply("READY");
   static uint8_t buf[APP_UPLOAD_BLOCK];
-  uint32_t got = 0, crc = 0, in_block = 0, last = millis();
+  uint32_t got = 0, crc = 0, in_block = 0, last = millis(), tx_waiting = last;
   bool write_failed = false;
-  while (got < h.size && millis() - last < APP_UPLOAD_IDLE_MS) {
+  while (got < h.size && !serial_hold_rx_gave_up(millis(), last, tx_waiting, APP_UPLOAD_IDLE_MS, APP_UPLOAD_STALL_MAX_MS)) {
+    if (Serial.availableForWrite() < SERIAL_TX_RING_BYTES) tx_waiting = millis(); // our ACK not out yet
     int avail = Serial.available();
     if (avail <= 0) {
       delay(1);
@@ -155,16 +159,19 @@ int apps_receive(bool (*cancel)(void)) {
     if (header != line) Log_info("Apps: %u bytes before \"TAPP \" dropped: %s", (unsigned)(header - line), got);
     app_upload_header_t h;
     char reason[112] = "";
+    serial_hold_set(true); // no log text between the replies (serial_hold.h); ends after the last one
     app_upload_result_t r = apps_parse_header(header, &h, reason, sizeof(reason));
     if (r == APP_UPLOAD_OK) r = receive_data(h, reason, sizeof(reason));
     if (r != APP_UPLOAD_OK) {
       Log_info("Apps: upload refused: %s%s%s", app_upload_result_str(r), reason[0] ? ": " : "", reason);
       apps_reply("ERR %s%s%s", app_upload_result_str(r), reason[0] ? ": " : "", reason);
+      serial_hold_set(false);
       continue;
     }
     received++;
-    Log_info("Apps: received %s, %lu bytes", h.path, (unsigned long)h.size);
     apps_reply("OK %s", h.path + sizeof(APPS_DIR));
+    serial_hold_set(false);
+    Log_info("Apps: received %s, %lu bytes", h.path, (unsigned long)h.size);
   }
   Log_info("Apps: upload mode ended, %d received", received);
   return received;

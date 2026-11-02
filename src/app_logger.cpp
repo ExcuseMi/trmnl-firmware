@@ -1,3 +1,6 @@
+#ifdef BOARD_TRMNL_X
+#include "serial_log_hw.h"
+#endif
 #include <ArduinoLog.h>
 #include <WiFi.h>
 #include <api-client/submit_log.h>
@@ -178,7 +181,11 @@ void log_impl(LogLevel level, LogMode mode, const char *file, int line, const ch
 // This mode is not handled correctly by underlying implementation,
 // so shortcut it here
   if (mode == LOG_SERIAL_ONLY) {
+#ifdef BOARD_TRMNL_X
+    serial_log_out().println(serial_buffer); // held back during a cable upload (serial_hold.h)
+#else
     Serial.println(serial_buffer);
+#endif
     return;
   }
 

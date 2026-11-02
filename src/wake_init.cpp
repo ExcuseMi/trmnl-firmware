@@ -1,3 +1,4 @@
+#include "serial_log_hw.h"
 #include <Arduino.h>
 #include <ArduinoLog.h>
 #include <WifiCaptive.h>
@@ -74,7 +75,8 @@ uint32_t bootEarly(void) {
   // it later races its ISR); with no host reading it drops instead of blocking after one 100 ms wait (HWCDC.cpp).
   Serial.setTxBufferSize(SERIAL_TX_RING_BYTES);
   Serial.begin(115200);
-  Log.begin(LOG_LEVEL_INFO, &Serial);
+  Log.begin(LOG_LEVEL_INFO, &serial_log_out()); // held back during a cable upload (serial_hold.h)
+  serial_log_hold_idf();
   serial_watch_start(); // HWCDC can stop sending for good while RX works (serial_watch.h)
   app_cable_x_start(); // apps over the USB cable while the X is awake; after Serial.begin (test_serial_begin)
 #endif

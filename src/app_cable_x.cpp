@@ -9,6 +9,7 @@
 #include <app_elf_check.h>
 #include <app_launch.h>
 #include <app_sleep_gate.h>
+#include <serial_hold.h>
 #include <apps.h>
 #include <esp_heap_caps.h>
 #include <filesystem.h>
@@ -61,6 +62,7 @@ static void upload(const char *header) {
     return;
   }
   app_cable_busy_set(true);
+  serial_hold_set(true); // no log text between the replies (serial_hold.h)
   char reason[112] = "";
   app_upload_header_t h;
   app_upload_result_t r = pending ? app_upload_parse(header, UINT64_MAX, &h) // the waiting file is not stale
@@ -113,6 +115,8 @@ static void upload(const char *header) {
     }
   }
 done:
+  serial_hold_set(false);
+  if (unsigned d = serial_hold_dropped_take()) Log_info("Serial: %u log writes held back during the upload", d);
   app_cable_busy_set(false);
   xSemaphoreGive(lock);
 }
