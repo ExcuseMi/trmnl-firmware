@@ -12,6 +12,8 @@
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
+
+#include "app_storage_x.h"
 #include <WiFi.h>
 #include <captive_ap.h>
 #include <esp_random.h>
@@ -123,7 +125,7 @@ static int fs_list(void *c, const char *dir, ws_list_cb_t cb, void *cx) {
   return n;
 }
 
-static uint64_t fs_free(void *) { return LittleFS.totalBytes() - LittleFS.usedBytes(); }
+static uint64_t fs_free(void *) { return app_storage_fs_free(nullptr, nullptr); } // full readings read again
 
 static int64_t fs_mtime(void *c, const char *path) {
   char p[128];

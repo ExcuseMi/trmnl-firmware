@@ -7,6 +7,9 @@
 // The X's storage for apps (lib/trmnl/include/app_space.h on LittleFS): the serial "TAPP DF" / "TAPP LS", the line at
 // boot in the event log, the Apps > Storage screen's text and its "Free space" action.
 
+// LittleFS free bytes, a clamped "full" reading read again (fs_space.h); used and unsure may be nullptr
+uint64_t app_storage_fs_free(uint64_t *used, bool *unsure);
+
 // "TAPP DF" (total, used, free bytes) and "TAPP LS" (every file with its size, then "TAPP LS END"); false otherwise
 bool app_storage_serial_command(const char *line);
 

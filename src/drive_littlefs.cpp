@@ -4,6 +4,8 @@
 #include "drive_littlefs.h"
 
 #include <LittleFS.h>
+
+#include "app_storage_x.h"
 #include <app_api.h>
 #include <app_path.h>
 
@@ -99,7 +101,7 @@ static int fs_list(void *ctx, const char *dir, drive_list_fn cb, void *cbctx) {
 
 static int64_t fs_free(void *ctx) {
   (void)ctx;
-  return (int64_t)LittleFS.totalBytes() - (int64_t)LittleFS.usedBytes();
+  return (int64_t)app_storage_fs_free(nullptr, nullptr); // full readings read again (fs_space.h)
 }
 
 void drive_littlefs(drive_fs_t *fs, const char *base) {
