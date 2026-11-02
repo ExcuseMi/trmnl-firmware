@@ -298,7 +298,7 @@ An app can tell the firmware knows INK by `api->size >= APP_API_SLOT(61)`.
 | what | how |
 |---|---|
 | call | `screen_refresh(rect, APP_REFRESH_INK)` queues rows `rect.y .. rect.y + h - 1` and returns at once (0, or `APP_EIO` from an earlier ink update that failed). Older firmware (no `APP_API_SLOT(61)`) gives a full refresh: check the size first |
-| passes | `APP_INK_PASSES` (2) instead of PARTIAL's 3, plus the driver's neutral scan. Every pass scans the whole panel (~51 ms on the X) whatever the rows: an ink update costs about 150 ms, PARTIAL about 200 ms. Columns are not windowed (FastEPD has no such call) |
+| passes | `APP_INK_PASSES` (3), the same as PARTIAL, plus the driver's neutral scan. Every pass scans the whole panel (~51 ms on the X) whatever the rows: an ink update costs about 200 ms like PARTIAL, but the app does not wait for it. Columns are not windowed (FastEPD has no such call) |
 | queue | a task on core 0 runs one update at a time; requests that come meanwhile merge into one range (first to last row) that runs next |
 | framebuffer | no copy: the driver reads each byte once at its start and keeps it as the panel's state, so drawing during an update is safe; what changed after it shows in the next one. Ask again for rows drawn after a request |
 | order | FULL, PARTIAL and `screen_set_mode` wait until the queue is idle (at most 3 s); the runner waits too when the app ends |

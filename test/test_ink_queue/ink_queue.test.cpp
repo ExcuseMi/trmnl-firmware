@@ -8,13 +8,12 @@ void tearDown() {}
 
 // ---- pass choice ----
 
-void test_ink_is_queued_with_fewer_passes_than_partial() {
+// Owner 2026-11-02: "undo the 2 passes": ink keeps PARTIAL's pass count, only the waiting is gone
+void test_ink_is_queued_with_the_same_passes_as_partial() {
   ink_plan_t ink = ink_plan(APP_REFRESH_INK, true), partial = ink_plan(APP_REFRESH_PARTIAL, true);
   TEST_ASSERT_EQUAL(INK_PLAN_QUEUE, ink.kind);
   TEST_ASSERT_FALSE(ink.wait_idle); // returns at once
-  TEST_ASSERT_TRUE(ink.passes >= 1);
-  TEST_ASSERT_TRUE(ink.passes < partial.passes);
-  TEST_ASSERT_TRUE(ink.passes <= 2); // the goal: 50 to 150 ms on the X (passes + 1 scans of ~51 ms)
+  TEST_ASSERT_EQUAL(partial.passes, ink.passes);
 }
 
 void test_partial_and_full_wait_for_the_queue_and_block() {
@@ -110,7 +109,7 @@ int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
   UNITY_BEGIN();
-  RUN_TEST(test_ink_is_queued_with_fewer_passes_than_partial);
+  RUN_TEST(test_ink_is_queued_with_the_same_passes_as_partial);
   RUN_TEST(test_partial_and_full_wait_for_the_queue_and_block);
   RUN_TEST(test_a_gray_screen_gets_a_full_refresh_for_ink);
   RUN_TEST(test_an_unknown_kind_is_refused);

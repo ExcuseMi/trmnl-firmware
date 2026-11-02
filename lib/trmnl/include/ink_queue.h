@@ -16,7 +16,7 @@
 // Passes for APP_REFRESH_INK (white<->black only; PARTIAL uses DISPLAY_PARTIAL_PASSES). Each pass, and the driver's
 // neutral scan after them, scans all rows of the panel: ~51 ms each on the X, whatever the rows asked for
 #ifndef APP_INK_PASSES
-#define APP_INK_PASSES 2
+#define APP_INK_PASSES 3 // owner 2026-11-02: same as PARTIAL (2 was undone)
 #endif
 #define DISPLAY_PARTIAL_PASSES 3 // src/display.cpp setPasses(3, 3)
 
