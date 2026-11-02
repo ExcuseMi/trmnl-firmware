@@ -374,7 +374,9 @@ bool IQS323::getRDYStatus(void)
   */
 void IQS323::queueValueUpdates(void)
 {
+#ifdef IQS323_DEBUG_STREAM // every RDY window: dozens a second in streaming mode, starves cable uploads
   Serial.printf("Queue value updates...\n");
+#endif
   uint8_t transferBytes[18];	// The array which will hold the bytes to be transferred.
 
 	/* Read the info flags. */
