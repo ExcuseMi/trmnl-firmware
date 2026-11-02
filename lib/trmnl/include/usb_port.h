@@ -43,6 +43,8 @@ const char *usb_role_str(usb_role_t role);
 // the app asks again. `boost` says which host mode it is.
 
 #define USB_PORT_POLL_MS  100
+// A removed device (a tablet that dropped off the bus mid-drawing) gets this long in host mode to come back
+#define USB_PORT_REJOIN_MS 2000
 // config/apps.json: USB_PORT_CLEAR_MS no input power this long before the boost may go on, USB_PORT_PROBE_MS host
 // mode without a keyboard: back to device mode, USB_PORT_RETRY_MS then this long in device mode before the next probe,
 // USB_PORT_OUTSIDE_PROBE_MS host mode with outside power without a device: back to serial
@@ -60,6 +62,7 @@ typedef enum {
   USB_WHY_PROBING, // host mode, waiting for a keyboard
   USB_WHY_KEYBOARD, // host mode, a keyboard is there
   USB_WHY_NO_KEYBOARD, // the probe found none, or it was removed: waiting USB_PORT_RETRY_MS
+  USB_WHY_REJOIN, // host mode, the device was removed: waiting USB_PORT_REJOIN_MS for it to enumerate again
   USB_WHY_PORT_TAKEN, // another role (the USB drive) has the PHY
   USB_WHY_OUTSIDE_PROBING, // host mode, boost off, outside power: waiting for a device (a hub's or an adapter's)
   USB_WHY_OUTSIDE_DEVICE, // host mode, boost off, outside power: a device is there
@@ -72,6 +75,7 @@ typedef struct {
   bool clear; // no input power since clear_since
   uint32_t clear_since;
   uint32_t host_since; // when host mode began
+  uint32_t gone_since; // USB_WHY_REJOIN: when the device was removed
   uint32_t retry_at; // device mode until then after a probe without a keyboard
   bool retry_wait;
   bool boost; // host mode with the X's boost on; false: host mode on outside power (or device mode)
@@ -140,3 +144,21 @@ void usb_boost_init(usb_boost_t *b, uint32_t now_ms); // host mode began: the fi
 bool usb_boost_due(const usb_boost_t *b, uint32_t now_ms); // off and a try is due
 // A try's result at `now_ms`: what to log
 usb_boost_log_t usb_boost_result(usb_boost_t *b, uint32_t now_ms, bool ok);
+
+// ---- leaving host mode: the order of the steps ----
+
+// The stack powers its root port off itself (usb_host_lib_set_root_port_power): every device and the external hub are
+// gone through the host library's own path, then freed; the boost goes off last. With the boost off first (as
+// before 2026-11-02) the hub's interrupt transfer failed while it was being freed, the hub was released twice and
+// ESP-IDF's ext_hub.c asserted (waiting_release): IllegalInstruction when Sketch handed over to Print, and on "back
+// to serial". usb_host_device_free_all needs every client deregistered first.
+typedef enum {
+  USB_STOP_CLOSE_HANDLES, // our HID interfaces closed
+  USB_STOP_PORT_OFF, // the root port off: the devices and hubs gone through the stack, VBUS still on
+  USB_STOP_CLIENTS_OFF, // the HID driver (once its devices are gone) and the device log deregister
+  USB_STOP_FREE_DEVICES, // usb_host_device_free_all, until ALL_FREE
+  USB_STOP_HOST_OFF, // usb_host_uninstall, the PHY given back
+  USB_STOP_BOOST_OFF, // VBUS off
+} usb_stop_step_t;
+#define USB_STOP_STEPS 6
+extern const usb_stop_step_t usb_stop_plan[USB_STOP_STEPS];

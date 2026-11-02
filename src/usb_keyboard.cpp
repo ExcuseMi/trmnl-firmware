@@ -15,6 +15,7 @@
 #include <usb_probe.h>
 
 #include "app_host.h"
+#include "battery.h"
 #include "evlog.h"
 #include "keyboards.h"
 #include "usb_dev_log.h"
@@ -189,8 +190,8 @@ static void log_pen_gone(const probe_slot_t &ps) {
   evlog_add("Pen i%u gone after %lu reports", ps.iface, (unsigned long)ps.pr.total);
 }
 
-// Stops the USB stack; false if it did not stop by `deadline`
-static bool host_stop(uint32_t deadline) {
+// Our HID interfaces closed; the tablet and mouse told they are gone
+static void close_handles(void) {
   if (open_dev) {
     hid_host_device_close(open_dev);
     open_dev = nullptr;
@@ -208,17 +209,45 @@ static bool host_stop(uint32_t deadline) {
   }
   if (had_pen) usb_pen_x_detach();
   if (had_mouse) usb_pen_x_mouse_detach();
-  while (hid_host_uninstall() != ESP_OK) { // a device still listed: its removal (boost off) takes a moment
-    if ((int32_t)(millis() - deadline) >= 0) return false;
-    delay(20);
+}
+
+// Stops the USB stack in usb_stop_plan's order (usb_port.h: the boost last); false if a step did not end by `deadline`
+static bool host_stop(uint32_t deadline, bool boost_on) {
+  for (int i = 0; i < USB_STOP_STEPS; i++) {
+    switch (usb_stop_plan[i]) {
+    case USB_STOP_CLOSE_HANDLES: close_handles(); break;
+    case USB_STOP_PORT_OFF: {
+      esp_err_t rc = usb_host_lib_set_root_port_power(false); // the devices go through the stack, VBUS stays on
+      if (rc != ESP_OK) evlog_add("USB keys: root port off failed: %s", esp_err_to_name(rc));
+      break;
+    }
+    case USB_STOP_CLIENTS_OFF:
+      while (hid_host_uninstall() != ESP_OK) { // its devices' removal (the root port's off) takes a moment
+        if ((int32_t)(millis() - deadline) >= 0) return false;
+        delay(20);
+      }
+      usb_dev_log_stop(); // every client off before free_all and the library's uninstall
+      break;
+    case USB_STOP_FREE_DEVICES: // lib_loop frees them (usb_host_device_free_all) and uninstalls: one wait for both
+      lib_stop = true;
+      break;
+    case USB_STOP_HOST_OFF:
+      while (lib_task) {
+        if ((int32_t)(millis() - deadline) >= 0) return false;
+        delay(10);
+      }
+      usb_port_give(USB_ROLE_HOST);
+      break;
+    case USB_STOP_BOOST_OFF:
+      if (boost_on && !boost(false, BOOST_OFF_WAIT_MS)) {
+        Log_error("USB keys: boost could not be switched off - restarting");
+        evlog_add("USB keys: boost could not be switched off, restarting");
+        evlog_flush(false);
+        esp_restart(); // the restart's handler and the boot switch it off
+      }
+      break;
+    }
   }
-  usb_dev_log_stop(); // every client off before the library's uninstall
-  lib_stop = true;
-  while (lib_task) {
-    if ((int32_t)(millis() - deadline) >= 0) return false;
-    delay(10);
-  }
-  usb_port_give(USB_ROLE_HOST);
   return true;
 }
 
@@ -367,7 +396,8 @@ static void drain_reports(void) {
     pen_mode_logged = mode;
     app_pen_info_t info;
     usb_pen_x_info(&info);
-    evlog_add("Pen %04x:%04x: %s mode", info.vid, info.pid, mode == APP_PEN_MODE_FULL ? "full" : "standard");
+    // logged with the first report in that mode: the pen's first touch or hover, not the switch's own time
+    evlog_add("Pen %04x:%04x: %s mode (first pen report)", info.vid, info.pid, mode == APP_PEN_MODE_FULL ? "full" : "standard");
   }
   while (xQueueReceive(report_q, &r, 0) == pdTRUE) {
     if (r.probe) {
@@ -398,6 +428,21 @@ static void drain_reports(void) {
   }
 }
 
+// The state of the power when a device left in host mode (a tablet that dropped off mid-drawing, 2026-11-02): the
+// battery, the boost pin as the expander reads it back, the charger's input power. -1: unread (the panel holds the
+// expander, or the gauge did not answer)
+static void log_device_left(void) {
+  int otg = -1, pg = -1;
+  if (expander_lock(100)) {
+    otg = bbep.ioRead(IOX_OTG_EN);
+    pg = bbep.ioRead(IOX_CHG_PG) == 0;
+    expander_unlock();
+  }
+  float v = battery().readVoltage();
+  evlog_add("USB keys: device left in host mode, waiting %d ms: batt %d mV, boost pin %d, input power %d", USB_PORT_REJOIN_MS,
+            v < 0 ? -1 : (int)(v * 1000.0f + 0.5f), otg, pg);
+}
+
 // ---- the port task ----
 
 static void port_loop(void *arg) {
@@ -411,6 +456,7 @@ static void port_loop(void *arg) {
   usb_boost_init(&bst, millis());
   bst.on = true; // device mode: nothing to switch on
   usb_power_t last_power = USB_POWER_UNKNOWN;
+  uint32_t gone_at = 0;
   while (true) {
     hid_host_device_handle_t h;
     if (xQueueReceive(conn_q, &h, pdMS_TO_TICKS(USB_PORT_POLL_MS)) == pdTRUE && applied == USB_PORT_HOST) {
@@ -432,6 +478,13 @@ static void port_loop(void *arg) {
                            keyboard_open || (pen_wanted && (pen_open() || mouse_open())), usb_port_role() == USB_ROLE_DRIVE};
     usb_port_mode_t mode = usb_port_step(&port, millis(), &in);
     if (port.why != why) {
+      if (port.why == USB_WHY_REJOIN) {
+        log_device_left();
+        gone_at = millis();
+      } else if (why == USB_WHY_REJOIN) {
+        evlog_add("USB keys: %s %lu ms after it left", port.why == USB_WHY_KEYBOARD ? "device back" : "device not back",
+                  (unsigned long)(millis() - gone_at));
+      }
       why = port.why;
       Log_info("USB keys: %s", usb_port_why_str(why));
       // not every probe (one per retry_ms without a keyboard): an unreadable charger and the outside power steps
@@ -447,13 +500,7 @@ static void port_loop(void *arg) {
       }
     } else if (mode == USB_PORT_DEVICE && applied == USB_PORT_HOST) {
       if (was_open) evlog_add("USB keys: host mode dropped with a keyboard on: %s", usb_port_why_str(why));
-      if (!boost(false, BOOST_OFF_WAIT_MS)) {
-        Log_error("USB keys: boost could not be switched off - restarting");
-        evlog_add("USB keys: boost could not be switched off, restarting");
-        evlog_flush(false);
-        esp_restart(); // the restart's handler and the boot switch it off
-      }
-      if (!host_stop(millis() + STOP_DEADLINE_MS)) {
+      if (!host_stop(millis() + STOP_DEADLINE_MS, true)) { // boost off even on outside power: it is off already
         Log_error("USB keys: USB host did not stop within %d ms - restarting", STOP_DEADLINE_MS);
         evlog_add("USB keys: USB host did not stop within %d ms, restarting", STOP_DEADLINE_MS);
         evlog_flush(false);

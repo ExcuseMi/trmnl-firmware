@@ -96,8 +96,14 @@ usb_port_mode_t usb_port_step(usb_port_t *p, uint32_t now, const usb_port_input_
       p->why = USB_WHY_KEYBOARD;
       return p->mode;
     }
-    // a keyboard that was there is gone, or the probe found none
-    if (p->why == USB_WHY_KEYBOARD || (uint32_t)(now - p->host_since) >= USB_PORT_PROBE_MS) {
+    if (p->why == USB_WHY_KEYBOARD) { // removed: a moment to enumerate again (a tablet that dropped off)
+      p->why = USB_WHY_REJOIN;
+      p->gone_since = now;
+      return p->mode;
+    }
+    if (p->why == USB_WHY_REJOIN && (uint32_t)(now - p->gone_since) < USB_PORT_REJOIN_MS) return p->mode;
+    // the removed one did not come back, or the probe found none
+    if (p->why == USB_WHY_REJOIN || (uint32_t)(now - p->host_since) >= USB_PORT_PROBE_MS) {
       p->retry_wait = true;
       p->retry_at = now + USB_PORT_RETRY_MS;
       return device(p, USB_WHY_NO_KEYBOARD);
@@ -119,6 +125,7 @@ const char *usb_port_why_str(usb_port_why_t why) {
   case USB_WHY_PROBING: return "host mode: looking for a keyboard";
   case USB_WHY_KEYBOARD: return "host mode: keyboard";
   case USB_WHY_NO_KEYBOARD: return "no keyboard: device mode, trying again later";
+  case USB_WHY_REJOIN: return "host mode: the device left, waiting for it to come back";
   case USB_WHY_PORT_TAKEN: return "the USB drive has the port";
   case USB_WHY_OUTSIDE_PROBING: return "host with outside power (boost off): looking for a device";
   case USB_WHY_OUTSIDE_DEVICE: return "host with outside power (boost off): device";
@@ -161,3 +168,6 @@ usb_boost_log_t usb_boost_result(usb_boost_t *b, uint32_t now_ms, bool ok) {
   b->next_at = now_ms + (b->tries < USB_BOOST_FAST_TRIES ? USB_BOOST_FAST_MS : USB_BOOST_SLOW_MS);
   return b->tries == USB_BOOST_FAST_TRIES ? USB_BOOST_LOG_FAILED : USB_BOOST_LOG_NONE;
 }
+
+const usb_stop_step_t usb_stop_plan[USB_STOP_STEPS] = {USB_STOP_CLOSE_HANDLES, USB_STOP_PORT_OFF,  USB_STOP_CLIENTS_OFF,
+                                                        USB_STOP_FREE_DEVICES,  USB_STOP_HOST_OFF, USB_STOP_BOOST_OFF};
