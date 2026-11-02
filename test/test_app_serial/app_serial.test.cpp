@@ -71,7 +71,7 @@ void test_noise_before_a_command_keeps_the_end_of_the_line() {
   TEST_ASSERT_NOT_NULL(strstr(lines, "TAPP EVLOG|"));
 }
 
-// Owner's X 2026-11-02: "TAPP RUN trmnl-print printer:192.168.1.40" (43 bytes) lost its "TAPP " to the 32-byte line
+// On the X 2026-11-02: "TAPP RUN trmnl-print printer:192.168.1.40" (42 bytes) lost its "TAPP " to the 32-byte line
 // and got no answer. A TAPP RUN with the longest start argument (APP_LAUNCH_ARG_MAX, 128) comes back whole
 void test_a_tapp_run_with_a_long_argument_comes_back_whole() {
   char line[200] = "TAPP RUN trmnl-print ";
