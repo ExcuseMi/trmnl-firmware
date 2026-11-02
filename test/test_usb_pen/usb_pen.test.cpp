@@ -327,6 +327,65 @@ void test_only_changes_unread_drops_and_counts() {
   TEST_ASSERT_EQUAL(3, q.dropped);
 }
 
+// owner 2026-11-02: hover reports (200 Hz) filled the queue while the app was busy. A slow app (one event taken per
+// four reports): hovering never overflows, every tip-down move and every change comes in order, each run of hovers
+// ends with its last place
+void test_hover_is_latest_wins_and_nothing_else_is_lost() {
+  static usb_pen_queue_t q;
+  static app_pen_event_t sent[2000], got[2000];
+  usb_pen_queue_init(&q);
+  unsigned ns = 0, ng = 0, deepest = 0;
+  uint16_t x = 0;
+  auto push = [&](uint8_t type, uint8_t flags, uint8_t changed) {
+    app_pen_event_t e = mk(type, changed, ++x);
+    e.flags = flags;
+    sent[ns++] = e;
+    usb_pen_queue_push(&q, &e);
+    if (q.count > deepest) deepest = q.count;
+    if (ns % 4 == 0 && usb_pen_queue_take(&q, &got[ng])) ng++;
+  };
+  const uint8_t H = APP_PEN_IN_RANGE, T = APP_PEN_IN_RANGE | APP_PEN_TIP;
+  push(APP_EVENT_PEN, H, APP_PEN_IN_RANGE); // comes in range
+  for (int i = 0; i < 1000; i++) push(APP_EVENT_PEN, H, 0);
+  for (int s = 0; s < 3; s++) { // three strokes, a pen button and a tablet button between them
+    push(APP_EVENT_PEN, T, APP_PEN_TIP);
+    for (int i = 0; i < 150; i++) push(APP_EVENT_PEN, T, 0);
+    push(APP_EVENT_PEN, H, APP_PEN_TIP);
+    for (int i = 0; i < 40; i++) push(APP_EVENT_PEN, H, 0);
+    push(APP_EVENT_PEN, H | APP_PEN_BARREL, APP_PEN_BARREL);
+    for (int i = 0; i < 40; i++) push(APP_EVENT_PEN, H | APP_PEN_BARREL, 0);
+    push(APP_EVENT_PEN, H, APP_PEN_BARREL);
+    push(APP_EVENT_PEN_KEY, H, 1);
+    push(APP_EVENT_PEN_KEY, H, 1);
+    for (int i = 0; i < 40; i++) push(APP_EVENT_PEN, H, 0);
+  }
+  push(APP_EVENT_PEN, 0, APP_PEN_IN_RANGE); // leaves
+  for (int i = 0; i < 5; i++) push(APP_EVENT_PEN, 0, 0); // out of range: kept
+  TEST_ASSERT_EQUAL(0, q.dropped);
+  TEST_ASSERT_LESS_THAN(USB_PEN_QUEUE, deepest); // never full
+  while (usb_pen_queue_take(&q, &got[ng])) ng++;
+  TEST_ASSERT_EQUAL(0, q.dropped);
+  TEST_ASSERT_GREATER_THAN(0, q.merged);
+  auto hover = [](const app_pen_event_t &e) {
+    return e.type == APP_EVENT_PEN && !e.changed && (e.flags & (APP_PEN_IN_RANGE | APP_PEN_TIP)) == APP_PEN_IN_RANGE;
+  };
+  unsigned j = 0; // every event that is not a hover, in order; hovers in order, each run's last delivered
+  for (unsigned i = 0; i < ns; i++) {
+    bool last_of_run = hover(sent[i]) && (i + 1 == ns || !hover(sent[i + 1]));
+    if (hover(sent[i]) && !last_of_run) {
+      if (j < ng && got[j].x == sent[i].x) j++; // taken before a later hover replaced it
+      continue;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(j < ng, "an event was lost");
+    TEST_ASSERT_EQUAL_MESSAGE(sent[i].x, got[j].x, "lost or reordered");
+    TEST_ASSERT_EQUAL(sent[i].changed, got[j].changed);
+    TEST_ASSERT_EQUAL(sent[i].type, got[j].type);
+    j++;
+  }
+  TEST_ASSERT_EQUAL(ng, j);
+  TEST_ASSERT_LESS_THAN(ns / 2, ng); // the hovers were merged
+}
+
 int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
@@ -352,5 +411,6 @@ int main(int argc, char **argv) {
   RUN_TEST(test_changes_keep_their_order_and_are_never_merged);
   RUN_TEST(test_full_queue_drops_a_move_never_a_change);
   RUN_TEST(test_only_changes_unread_drops_and_counts);
+  RUN_TEST(test_hover_is_latest_wins_and_nothing_else_is_lost);
   return UNITY_END();
 }

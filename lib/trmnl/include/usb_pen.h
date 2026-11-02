@@ -80,9 +80,10 @@ void usb_pen_info(const usb_pen_t *p, app_pen_info_t *out);
 
 // ---- the queue to the app ----
 
-// Holds the pen events the app has not taken, every move in order (device 2026-11-01: merging unread moves into the
-// latest turned curves into straight lines while the app waited on a panel refresh). 512 events = 2.5 s at 200 Hz.
-// Only when full: a move onto a move at the end replaces it; a change (tip, range, a pen or tablet button) is never
+// Holds the pen events the app has not taken, every move with the tip down in order (device 2026-11-01: merging unread
+// moves into the latest turned curves into straight lines while the app waited on a panel refresh). 512 events = 2.5 s
+// at 200 Hz. A hover (a move in range, tip up) onto an unread hover at the end replaces it (latest wins, owner
+// 2026-11-02; counted in `merged`, not a drop): hovering never fills the queue. Only when full: a move onto a move at the end replaces it; a change (tip, range, a pen or tablet button) is never
 // merged, a waiting move makes room for it, and only with USB_PEN_QUEUE changes unread is one dropped. Every drop is
 // counted
 #define USB_PEN_QUEUE 512
@@ -91,6 +92,7 @@ typedef struct {
   app_pen_event_t ev[USB_PEN_QUEUE];
   uint16_t head, count;
   uint32_t dropped;
+  uint32_t merged; // hovers replaced by a later hover before the app took them
 } usb_pen_queue_t;
 
 void usb_pen_queue_init(usb_pen_queue_t *q);

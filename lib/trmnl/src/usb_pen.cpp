@@ -143,7 +143,17 @@ static bool is_move(const app_pen_event_t *e) { return e->type == APP_EVENT_PEN 
 
 static app_pen_event_t *at(usb_pen_queue_t *q, unsigned i) { return &q->ev[(q->head + i) % USB_PEN_QUEUE]; }
 
+// A move with the pen over the tablet, tip up: only its latest place matters to the app
+static bool is_hover(const app_pen_event_t *e) {
+  return is_move(e) && (e->flags & (APP_PEN_IN_RANGE | APP_PEN_TIP)) == APP_PEN_IN_RANGE;
+}
+
 void usb_pen_queue_push(usb_pen_queue_t *q, const app_pen_event_t *e) {
+  if (q->count && is_hover(e) && is_hover(at(q, q->count - 1u))) {
+    *at(q, q->count - 1u) = *e; // latest wins: the unread hover at the end takes this place, nothing passes it
+    q->merged++;
+    return;
+  }
   if (q->count == USB_PEN_QUEUE) {
     q->dropped++;
     if (is_move(e)) {

@@ -138,8 +138,9 @@ void usb_pen_x_detach(void) {
   if (((had && o.n) || keys) && wanted) post_token();
   // the largest raw values seen: checks the assumed full-mode maxima (usb_pen.h)
   if (had)
-    evlog_add("Pen %04x:%04x gone, %lu pen frames, raw max x %u y %u p %u, dropped %lu", was.vid, was.pid,
-              (unsigned long)was.pen_frames, was.raw_max_x, was.raw_max_y, was.raw_max_p, (unsigned long)queue.dropped);
+    evlog_add("Pen %04x:%04x gone, %lu pen frames, raw max x %u y %u p %u, dropped %lu, hovers merged %lu",
+              was.vid, was.pid, (unsigned long)was.pen_frames, was.raw_max_x, was.raw_max_y, was.raw_max_p,
+              (unsigned long)queue.dropped, (unsigned long)queue.merged);
 }
 
 void usb_pen_x_report(usb_pen_iface_t role, const uint8_t *d, size_t len) {
