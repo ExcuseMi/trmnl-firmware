@@ -14,6 +14,10 @@ void Modem::tcpOnLine(void *ctx, const char *line) {
   Modem *m = (Modem *)ctx;
   if (m->_srvEvent || m->_capPrefix) m->serverLine(line);
   size_t n = strlen(line);
+  if (n) {
+    memcpy(m->_last[0], m->_last[1], sizeof(m->_last[0]));
+    snprintf(m->_last[1], sizeof(m->_last[1]), "%s", line);
+  }
   bool closed = strcmp(line, "CLOSED") == 0 || (n > 7 && strcmp(line + n - 7, ",CLOSED") == 0);
   if (closed && m->_probeLink < 0) m->_closed = true; // a probe's own link: serverLine (a phone's link is not it)
   if (m->_hit >= 0) return;
@@ -24,6 +28,8 @@ void Modem::tcpOnLine(void *ctx, const char *line) {
     }
   }
 }
+
+void Modem::tcpLastLines(char *out, size_t n) const { snprintf(out, n, "'%s' '%s'", _last[0], _last[1]); }
 
 void Modem::tcpOnPrompt(void *ctx) { ((Modem *)ctx)->_prompt = true; }
 

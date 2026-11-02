@@ -49,4 +49,6 @@ int app_host_setting_remove(const char *key);
 // API 2.9: the running app's start argument; the launch it asked for (taken once by the runner after it returned 0)
 void app_host_set_arg(const char *arg);
 bool app_host_take_launch(char *app, size_t app_len, char *arg, size_t arg_len);
+// "TAPP RUN <app>" (app_cable_x.h): the next app as if the running one had called app_launch
+bool app_host_launch_from_cable(const char *app, const char *arg);
 void app_host_clear_launch(void);

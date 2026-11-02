@@ -52,6 +52,21 @@ const char *app_cable_line_command(const app_cable_line_t *l) {
   return h && strncmp(h, "TAPP PUT ", 9) != 0 ? h : nullptr;
 }
 
+bool app_cable_run_name(const char *line, char *name, size_t n) {
+  if (!line || !name || !n || strncmp(line, "TAPP RUN ", 9) != 0) return false;
+  const char *a = line + 9;
+  size_t l = strcspn(a, " \r\n");
+  if (l == 0 || l >= n) return false;
+  memcpy(name, a, l);
+  name[l] = '\0';
+  return app_path_app_ok(name);
+}
+
+const char *app_cable_run_arg(const char *line) {
+  const char *sp = line ? strchr(line + (strncmp(line, "TAPP RUN ", 9) ? 0 : 9), ' ') : nullptr;
+  return sp && line && !strncmp(line, "TAPP RUN ", 9) ? sp + 1 : "";
+}
+
 static volatile bool busy;
 void app_cable_busy_set(bool b) { busy = b; }
 bool app_cable_busy(void) { return busy; }

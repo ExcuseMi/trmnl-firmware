@@ -106,6 +106,25 @@ void test_sleep_waits_for_a_long_upload_and_between_files() {
   app_cable_busy_set(false);
 }
 
+// "TAPP RUN <app>": a test over the cable starts an installed app without the glass (2026-11-02, Print's search)
+void test_run_names_an_app_or_is_refused() {
+  char n[32];
+  TEST_ASSERT_TRUE(app_cable_run_name("TAPP RUN trmnl-print", n, sizeof(n)));
+  TEST_ASSERT_EQUAL_STRING("trmnl-print", n);
+  TEST_ASSERT_TRUE(app_cable_run_name("TAPP RUN trmnl-print\r", n, sizeof(n)));
+  TEST_ASSERT_EQUAL_STRING("trmnl-print", n);
+  TEST_ASSERT_EQUAL_STRING("", app_cable_run_arg("TAPP RUN trmnl-print"));
+  TEST_ASSERT_TRUE(app_cable_run_name("TAPP RUN trmnl-print setup:trmnl-sketch", n, sizeof(n)));
+  TEST_ASSERT_EQUAL_STRING("trmnl-print", n);
+  TEST_ASSERT_EQUAL_STRING("setup:trmnl-sketch", app_cable_run_arg("TAPP RUN trmnl-print setup:trmnl-sketch"));
+  TEST_ASSERT_EQUAL_STRING("", app_cable_run_arg("TAPP LS x"));
+  TEST_ASSERT_FALSE(app_cable_run_name("TAPP RUN ../x", n, sizeof(n)));
+  TEST_ASSERT_FALSE(app_cable_run_name("TAPP RUN ", n, sizeof(n)));
+  TEST_ASSERT_FALSE(app_cable_run_name("TAPP RUN a/b", n, sizeof(n)));
+  TEST_ASSERT_FALSE(app_cable_run_name("TAPP LS", n, sizeof(n)));
+  TEST_ASSERT_FALSE(app_cable_run_name("TAPP RUN averyveryverylongappnamethatdoesnotfit", n, 8));
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_commands_other_than_put_are_seen);
@@ -119,5 +138,6 @@ int main(int, char **) {
   RUN_TEST(test_busy_flag);
   RUN_TEST(test_header_while_an_update_waits_never_touches_its_file);
   RUN_TEST(test_header_with_nothing_waiting);
+  RUN_TEST(test_run_names_an_app_or_is_refused);
   return UNITY_END();
 }

@@ -60,12 +60,19 @@ static bool have_body(void *) {
 
 // One address: a connect with its own short timeout, then Get-Printer-Attributes; a port 631 that speaks HTTP is a
 // print server, its model, else its address, names it
-static void probe(Modem *m, int link, uint32_t ip, uint32_t wait, nb_list_t *out) {
+static void probe(Modem *m, int link, uint32_t ip, uint32_t wait, nb_list_t *out, bool tell) {
   char host[16];
   nb_ip_str(ip, host, sizeof(host));
   reply_n = 0;
+  uint32_t t0 = millis();
   bool open = link >= 0 ? m->serverProbeOpen(link, host, 631, wait, on_reply, nullptr)
                         : m->tcpOpen(host, 631, false, wait, on_reply, nullptr, true);
+  if (tell) { // the first probes' answers: a connect refused at once shows why (2026-11-02: 253 in 2.7 s)
+    char last[104];
+    m->tcpLastLines(last, sizeof(last));
+    evlog_add("Net: probe %s %s after %lu ms, modem: %s", host, open ? "open" : "no", (unsigned long)(millis() - t0),
+              last);
+  }
   if (!open) return;
   uint8_t q[256];
   char head[256];
@@ -95,7 +102,7 @@ static int walk(Modem *m, int link, uint32_t timeout_ms, nb_list_t *out) {
   int cn = x_devset_get("printer", cfg, sizeof(cfg));
   if (cn > 0 && nb_cfg_host_ip(cfg, (size_t)cn, &saved) && saved != self) {
     probed++;
-    probe(m, link, saved, wait, out);
+    probe(m, link, saved, wait, out, true);
   } else {
     saved = 0;
   }
@@ -105,7 +112,7 @@ static int walk(Modem *m, int link, uint32_t timeout_ms, nb_list_t *out) {
     if (ip == saved) continue;
     probed++;
     last = ip;
-    probe(m, link, ip, wait, out);
+    probe(m, link, ip, wait, out, probed <= 3);
   }
   char me[16], to[16], sv[16];
   nb_ip_str(self, me, sizeof(me));

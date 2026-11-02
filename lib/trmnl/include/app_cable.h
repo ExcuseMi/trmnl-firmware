@@ -51,6 +51,12 @@ bool app_cable_line_feed(app_cable_line_t *l, unsigned char b, const char **head
 // "TAPP EVLOG", "TAPP LS", "TAPP DF"), else nullptr. Valid until the next feed
 const char *app_cable_line_command(const app_cable_line_t *l);
 
+// "TAPP RUN <app>": the app's name (app_path_app_ok) into `name`; false for any other line or a bad name. The X asks
+// the running app to exit and starts this one (src/app_cable_x.cpp); "TAPP RUN OK <app>" or "TAPP ERR ..." answers
+bool app_cable_run_name(const char *line, char *name, size_t n);
+// The start argument after the name ("TAPP RUN trmnl-print setup:trmnl-sketch"), "" when none; it ends at CR/LF
+const char *app_cable_run_arg(const char *line);
+
 // Bytes of an upload may reach the app's key reader or the menu: while an upload is received nothing else reads the port
 void app_cable_busy_set(bool busy);
 bool app_cable_busy(void);

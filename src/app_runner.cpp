@@ -302,6 +302,18 @@ static bool app_supervise(PreferencesPersistence &persistence) {
       exit_asked = millis();
       app_exit_asked = true;
     }
+    char run[32], run_arg[APP_LAUNCH_ARG_MAX + 1];
+    if (!exit_asked && app_cable_x_run_take(run, sizeof(run), run_arg, sizeof(run_arg))) {
+      // "TAPP RUN" over the cable: like the app's own app_launch, then an exit (tests without the glass)
+      if (app_host_launch_from_cable(run, run_arg)) {
+        app_event_t ev = {};
+        ev.type = APP_EVENT_EXIT;
+        xQueueReset(app_host.events);
+        usb_pen_x_token_taken();
+        post(ev);
+        exit_asked = millis();
+      }
+    }
     if (!exit_asked && app_idle_x_poll() == APP_IDLE_EXPIRED) {
       // Like a long press, and not resumed after the next wake: a timed-out app is quit, not interrupted
       app_idle_closed_min = app_idle_x_minutes();

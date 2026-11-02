@@ -355,6 +355,15 @@ bool app_host_take_launch(char *app, size_t app_len, char *arg, size_t arg_len) 
 
 void app_host_clear_launch(void) { launch_next.pending = false; }
 
+bool app_host_launch_from_cable(const char *app, const char *arg) {
+  char elf[APP_PATH_MAX + 32];
+  if (!app || !app_path_app_ok(app)) return false;
+  snprintf(elf, sizeof(elf), APPS_DIR "/%s.elf", app);
+  int rc = app_launch_set(&launch_next, app, arg, LittleFS.exists(elf));
+  Log_event("Apps: the cable asks to start %s (%d)", app, rc);
+  return rc == 0;
+}
+
 // ---- API 2.12: the phone page next ----
 
 static int device_page_open(const char *section) {

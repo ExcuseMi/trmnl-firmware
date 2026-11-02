@@ -7,6 +7,7 @@
 #include <LittleFS.h>
 #include <app_cable.h>
 #include <app_elf_check.h>
+#include <app_launch.h>
 #include <app_sleep_gate.h>
 #include <apps.h>
 #include <esp_heap_caps.h>
@@ -17,6 +18,7 @@
 #include <string.h>
 #include <trmnl_log.h>
 
+#include "app_host.h"
 #include "app_receive.h"
 #include "app_storage_x.h"
 #include "evlog.h"
@@ -144,7 +146,38 @@ bool app_cable_x_finish(char *path, unsigned len) {
   return true;
 }
 
-bool app_cable_x_command(const char *line) { return evlog_serial_command(line) || app_storage_serial_command(line); }
+static char run_next[32], run_arg[APP_LAUNCH_ARG_MAX + 1]; // "TAPP RUN <app> [arg]": started once the running app has exited
+static volatile bool run_pending;
+
+static bool run_command(const char *line) {
+  char name[sizeof(run_next)];
+  if (strncmp(line, "TAPP RUN", 8) != 0) return false;
+  char elf[sizeof(name) + 16];
+  if (!app_cable_run_name(line, name, sizeof(name))) apps_reply("ERR run: not an app name");
+  else if (snprintf(elf, sizeof(elf), APPS_DIR "/%s.elf", name), !LittleFS.exists(elf)) apps_reply("ERR run: %s is not installed", name);
+  else if (!app_host.name[0]) apps_reply("ERR run: no app runs (start one on the X first)");
+  else {
+    snprintf(run_next, sizeof(run_next), "%s", name);
+    const char *arg = app_cable_run_arg(line);
+    snprintf(run_arg, sizeof(run_arg), "%.*s", (int)strcspn(arg, "\r\n"), arg);
+    run_pending = true;
+    evlog_add("Cable: run %s asked, %s is asked to exit", name, app_host.name);
+    apps_reply("RUN OK %s", name);
+  }
+  return true;
+}
+
+bool app_cable_x_run_take(char *name, size_t n, char *arg, size_t arg_n) {
+  if (!run_pending) return false;
+  run_pending = false;
+  snprintf(name, n, "%s", run_next);
+  snprintf(arg, arg_n, "%s", run_arg);
+  return true;
+}
+
+bool app_cable_x_command(const char *line) {
+  return evlog_serial_command(line) || app_storage_serial_command(line) || run_command(line);
+}
 
 // Serial was begun by bootEarly before this task starts (test_serial_begin): a begin() here raced it on the other core
 // and installed a second HWCDC interrupt

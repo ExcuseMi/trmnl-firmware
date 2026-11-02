@@ -1,6 +1,8 @@
 #pragma once
 #ifdef BOARD_TRMNL_X
 
+#include <stddef.h>
+
 // Updating apps over the USB cable while the X is awake (lib/trmnl/include/app_cable.h, docs/apps.md "Update over the
 // cable"). Not running: a task reads the port. An app running: the app runner's supervise loop hands the header to
 // app_cable_x_header (the app keeps the port's keys otherwise).
@@ -13,6 +15,9 @@ void app_cable_x_header(const char *header);
 
 // A serial command line that is not a header ("TAPP EVLOG", "TAPP LS", "TAPP DF"): answered; false if unknown
 bool app_cable_x_command(const char *line);
+
+// "TAPP RUN <app>" was answered OK: its name, once (the caller asks the running app to exit and starts this one next)
+bool app_cable_x_run_take(char *name, size_t n, char *arg, size_t arg_n);
 
 // True when the app running now must exit so its new file can replace it (the same app was uploaded); the caller posts
 // APP_EVENT_EXIT once

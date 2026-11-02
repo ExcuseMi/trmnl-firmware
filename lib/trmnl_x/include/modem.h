@@ -26,6 +26,7 @@ private:
   size_t _wantCount = 0;
   int _hit = -1;
   bool _prompt = false, _closed = true;
+  char _last[2][48] = {}; // the last two answer lines (tcpLastLines), for a refused command
   size_t tcpRead();
   int tcpWait(const char *const *want, size_t count, uint32_t timeoutMs, bool prompt);
   static void tcpOnLine(void *ctx, const char *line);
@@ -96,6 +97,8 @@ public:
   // received byte goes to `sink`. SSL does not verify the server (the AT firmware holds no CA bundle).
   typedef void (*TcpSink)(void *ctx, const uint8_t *data, size_t len);
   // quick: wait only timeoutMs (no 5 s minimum), one try, a connect that got no answer is closed (address probes)
+  // The last two lines the modem answered (e.g. "ERR CODE:..." and "ERROR"), for the event log
+  void tcpLastLines(char *out, size_t n) const;
   bool tcpOpen(const char *host, uint16_t port, bool tls, uint32_t timeoutMs, TcpSink sink, void *ctx, bool quick = false);
   // The station's IPv4 address in host order (AT+CIPSTA?), 0 when there is none
   uint32_t getIp();
