@@ -4,6 +4,7 @@
 #include "evlog.h"
 #include "evlog_crash.h"
 #include "serial_out_hw.h"
+#include "webshare.h" // webshare_fs_root
 
 #include <Arduino.h>
 #include <app_api.h>
@@ -11,12 +12,14 @@
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <evlog_ring.h>
+#include <fs_replace.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <stdarg.h>
 #include <time.h>
 
 #define EVLOG_FILE "/evlog.bin"
+#define EVLOG_TMP "/evlog.tmp"
 #define EVLOG_TASK_POLL_MS 1000 // a deferred write goes out within this after its gap
 
 static evlog_ring_t ring;
@@ -59,11 +62,9 @@ static void write_out(bool force) {
   }
   xSemaphoreGive(mu);
   if (go) {
-    File f = LittleFS.open(EVLOG_FILE, "w");
-    size_t n = f ? f.write(snap, EVLOG_BYTES) : 0;
-    if (f) f.close();
-    if (n != EVLOG_BYTES) {
-      Log_error("Event log: write failed (%u of %u bytes)", (unsigned)n, (unsigned)EVLOG_BYTES);
+    // never "w" over the file: on a full disk that left it empty (owner's X 2026-11-02, the log lost)
+    if (fs_replace(webshare_fs_root(), EVLOG_FILE + 1, EVLOG_TMP + 1, snap, EVLOG_BYTES) != 0) {
+      Log_error("Event log: write failed (disk full?), the saved log kept");
       xSemaphoreTake(mu, portMAX_DELAY);
       ring.dirty = true; // the next gap tries again
       xSemaphoreGive(mu);
