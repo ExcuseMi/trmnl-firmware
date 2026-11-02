@@ -3,7 +3,7 @@
 #include <unity.h>
 
 static app_serial_t s;
-static char keys[512], lines[256];
+static char keys[512], lines[1024];
 
 void setUp() {
   app_serial_init(&s);
@@ -71,11 +71,24 @@ void test_noise_before_a_command_keeps_the_end_of_the_line() {
   TEST_ASSERT_NOT_NULL(strstr(lines, "TAPP EVLOG|"));
 }
 
+// Owner's X 2026-11-02: "TAPP RUN trmnl-print printer:192.168.1.40" (43 bytes) lost its "TAPP " to the 32-byte line
+// and got no answer. A TAPP RUN with the longest start argument (APP_LAUNCH_ARG_MAX, 128) comes back whole
+void test_a_tapp_run_with_a_long_argument_comes_back_whole() {
+  char line[200] = "TAPP RUN trmnl-print ";
+  for (int i = 0; i < 128; i++) strcat(line, "a");
+  strcat(line, "\n");
+  feed(line, strlen(line));
+  line[strlen(line) - 1] = '|';
+  TEST_ASSERT_EQUAL_STRING(line, lines);
+  TEST_ASSERT_EQUAL_STRING("", keys);
+}
+
 int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
   UNITY_BEGIN();
   RUN_TEST(test_tapp_lines_never_type);
+  RUN_TEST(test_a_tapp_run_with_a_long_argument_comes_back_whole);
   RUN_TEST(test_plain_bytes_never_type);
   RUN_TEST(test_a_tkey_line_types_its_text_with_escapes);
   RUN_TEST(test_utf8_and_long_tkey_lines_pass);

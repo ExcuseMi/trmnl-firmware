@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-#define APP_SERIAL_LINE_MAX 32
+#define APP_SERIAL_LINE_MAX 192 // a "TAPP RUN <app> <arg>" with the longest argument (APP_LAUNCH_ARG_MAX 128)
 
 typedef enum { APP_SERIAL_NONE, APP_SERIAL_KEY, APP_SERIAL_LINE } app_serial_out_t;
 
