@@ -184,15 +184,12 @@ size_t filesystem_write_to_file(const char *name, uint8_t *in_buffer, size_t siz
       uint16_t res = file.write(in_buffer + bytesWritten, chunkSize);
       if (res != chunkSize) {
         file.close();
-
-        Log_info("Erasing FS...");
-        if (FS.format()) {
-          Log_info("FS erased successfully.");
-        } else {
-          Log_error("Error erasing FS.");
-        }
-
-        return bytesWritten;
+        // never FS.format() here: a full disk erased everything on it, the apps and their saves with it
+        // (test/config/test_no_fs_erase.py). The half-written file goes, the rest stays.
+        FS.remove(name);
+        Log_error("file %s: write failed after %u of %u bytes (disk full?), removed", name, (unsigned)bytesWritten,
+                  (unsigned)size);
+        return 0;
       }
       bytesWritten += chunkSize;
     }
