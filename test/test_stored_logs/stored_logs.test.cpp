@@ -5,6 +5,20 @@
 #include <unity.h>
 #include <unordered_map>
 
+// Owner's X 2026-11-02: ten stored logs of ~450 bytes filled the 20 KB NVS. On the X at most STORED_LOGS_X_MAX keys
+// exist, however many logs are stored
+void test_the_x_keeps_its_stored_logs_bounded() {
+  MemoryPersistence persistence;
+  StoredLogs subject(STORED_LOGS_X_MAX / 2, STORED_LOGS_X_MAX - STORED_LOGS_X_MAX / 2, "log_", "log_head", persistence);
+  std::string big(450, 'x');
+  for (int i = 0; i < 30; i++) subject.store_log(String(big.c_str()));
+  size_t logs = 0;
+  for (int i = 0; i < 16; i++)
+    if (persistence.recordExists(("log_" + std::to_string(i)).c_str())) logs++;
+  TEST_ASSERT_LESS_OR_EQUAL(2, logs);
+  TEST_ASSERT_LESS_OR_EQUAL(2, STORED_LOGS_X_MAX);
+}
+
 void test_stores_several_strings() {
   MemoryPersistence persistence;
   StoredLogs subject(0, 3, "log_", "log_head", persistence);
@@ -122,6 +136,7 @@ void tearDown(void) {}
 
 void process() {
   UNITY_BEGIN();
+  RUN_TEST(test_the_x_keeps_its_stored_logs_bounded);
   RUN_TEST(test_stores_several_strings);
   RUN_TEST(test_circular_buffer_overwrites_oldest);
   RUN_TEST(test_overwrite_counter);

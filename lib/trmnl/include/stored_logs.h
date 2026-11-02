@@ -1,5 +1,8 @@
 #pragma once
 
+// Logs kept in NVS on the X (old + new): its NVS budget, see include/config.h
+#define STORED_LOGS_X_MAX 2
+
 #include <Arduino.h>
 #include <persistence_interface.h>
 #include <stddef.h>

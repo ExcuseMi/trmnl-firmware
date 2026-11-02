@@ -20,7 +20,13 @@
 // Compile-time firmware version string
 #define FW_VERSION_STRING    TOSTRING(FW_MAJOR_VERSION) "." TOSTRING(FW_MINOR_VERSION) "." TOSTRING(FW_PATCH_VERSION)
 
+#ifdef BOARD_TRMNL_X
+// The X's NVS is 20 KB (504 entries) and a stored log takes about 14: ten of them, never sent while on 5 GHz,
+// filled it with the Wi-Fi data (owner's X 2026-11-02: every write failed, "flash full?"). stored_logs.h
+#define LOG_MAX_NOTES_NUMBER STORED_LOGS_X_MAX
+#else
 #define LOG_MAX_NOTES_NUMBER 10
+#endif
 
 #define PREFERENCES_API_KEY  "api_key"
 #define PREFERENCES_API_KEY_DEFAULT          ""
