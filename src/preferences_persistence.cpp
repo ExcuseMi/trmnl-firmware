@@ -4,7 +4,20 @@
 #include <Preferences.h>
 #include <nvs.h>
 #include <preferences_persistence.h>
+#include <nvs_write.h>
+#include <string.h>
 #include <trmnl_log.h>
+#ifdef BOARD_TRMNL_X
+#include "evlog.h"
+#endif
+
+// Every failed write in the log and the event log (nvs_write.h)
+static void report(const char *key, size_t got, size_t want) {
+  Log_error("NVS: write of %s failed (%u of %u bytes)", key, (unsigned)got, (unsigned)want);
+#ifdef BOARD_TRMNL_X
+  evlog_add("NVS: write of %s failed (%u of %u bytes)", key, (unsigned)got, (unsigned)want);
+#endif
+}
 
 PreferencesPersistence::PreferencesPersistence(Preferences &preferences) : _preferences(preferences) {}
 
@@ -19,11 +32,15 @@ uint32_t PreferencesPersistence::readUint(const char *key, const uint32_t defaul
 }
 
 size_t PreferencesPersistence::writeUint(const char *key, const uint32_t value) {
-  return _preferences.putUInt(key, value);
+  size_t n = _preferences.putUInt(key, value);
+  nvs_write_check(key, n, sizeof(uint32_t), report);
+  return n;
 }
 
 size_t PreferencesPersistence::writeString(const char *key, const char *value) {
-  return _preferences.putString(key, value);
+  size_t n = _preferences.putString(key, value);
+  if (value && value[0]) nvs_write_check(key, n, strlen(value), report); // "" returns 0 also when it worked
+  return n;
 }
 
 uint8_t PreferencesPersistence::readUChar(const char *key, const uint8_t defaultValue) {
@@ -31,14 +48,20 @@ uint8_t PreferencesPersistence::readUChar(const char *key, const uint8_t default
 }
 
 size_t PreferencesPersistence::writeUChar(const char *key, const uint8_t value) {
-  return _preferences.putUChar(key, value);
+  size_t n = _preferences.putUChar(key, value);
+  nvs_write_check(key, n, 1, report);
+  return n;
 }
 
 bool PreferencesPersistence::readBool(const char *key, const bool defaultValue) {
   return _preferences.getBool(key, defaultValue);
 }
 
-size_t PreferencesPersistence::writeBool(const char *key, const bool value) { return _preferences.putBool(key, value); }
+size_t PreferencesPersistence::writeBool(const char *key, const bool value) {
+  size_t n = _preferences.putBool(key, value);
+  nvs_write_check(key, n, 1, report);
+  return n;
+}
 
 bool PreferencesPersistence::clear() { return _preferences.clear(); }
 

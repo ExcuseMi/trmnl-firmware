@@ -1,3 +1,4 @@
+#include "nvs_stats_x.h"
 #include "serial_log_hw.h"
 #include <Arduino.h>
 #include <ArduinoLog.h>
@@ -162,6 +163,7 @@ void startBoardHardware(const WakeContext &wake, uint32_t init_time) {
   filesystem_init();
   evlog_begin(); // the event log of the last boots, before an app is resumed
   app_storage_boot_log(); // the apps and their sizes, once per boot
+  nvs_stats_boot_log(); // NVS fill, once per boot (2026-11-02: "flash full?")
 
   Wire.setClock(100000);
 

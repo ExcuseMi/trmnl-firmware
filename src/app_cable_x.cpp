@@ -22,6 +22,7 @@
 #include "app_host.h"
 #include "app_receive.h"
 #include "app_storage_x.h"
+#include "nvs_stats_x.h"
 #include "evlog.h"
 #include "usb_port_role.h"
 
@@ -180,7 +181,8 @@ bool app_cable_x_run_take(char *name, size_t n, char *arg, size_t arg_n) {
 }
 
 bool app_cable_x_command(const char *line) {
-  return evlog_serial_command(line) || app_storage_serial_command(line) || run_command(line);
+  return evlog_serial_command(line) || app_storage_serial_command(line) || nvs_stats_serial_command(line) ||
+         run_command(line);
 }
 
 // Serial was begun by bootEarly before this task starts (test_serial_begin): a begin() here raced it on the other core
