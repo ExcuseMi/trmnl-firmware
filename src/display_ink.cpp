@@ -9,6 +9,7 @@
 #include <trmnl_log.h>
 
 #include "app_host.h"
+#include "app_pulse_x.h"
 
 static portMUX_TYPE ink_mux = portMUX_INITIALIZER_UNLOCKED;
 static ink_queue_t ink_q; // zero: idle
@@ -24,9 +25,11 @@ static bool ink_run(int y0, int y1) {
   xSemaphoreTake(panel, portMAX_DELAY);
   bool ok = true;
   if (!app_host.screen_held) { // the pairing screen is up; it puts the app's pixels back when done
+    const uint32_t t0 = millis();
     bbep.setPasses(APP_INK_PASSES, DISPLAY_PARTIAL_PASSES);
     ok = bbep.partialUpdate(true, y0, y1) == BBEP_SUCCESS;
     bbep.setPasses(DISPLAY_PARTIAL_PASSES, DISPLAY_PARTIAL_PASSES); // as src/display.cpp sets it
+    app_pulse_x_ink(millis() - t0); // the pulse line: what one ink update costs (app_pulse_x.h)
   }
   xSemaphoreGive(panel);
   if (!ok) Log_error("ink update of rows %d..%d failed", y0, y1);
@@ -58,6 +61,7 @@ int display_ink_request(int y0, int y1) {
     Log_error("ink: no task (out of memory), updating in the app's call");
     return ink_run(y0, y1) ? 0 : APP_EIO;
   }
+  app_pulse_x_ink_request();
   taskENTER_CRITICAL(&ink_mux);
   int err = ink_queue_take_error(&ink_q);
   bool wake = ink_queue_add(&ink_q, y0, y1);

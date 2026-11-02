@@ -12,6 +12,7 @@
 
 #include "app_host.h"
 #include "app_idle_x.h"
+#include "app_pulse_x.h"
 #include "evlog.h"
 
 int usb_keyboard_pen(bool on); // usb_keyboard.cpp: the port in host mode for the pen as for keys
@@ -88,7 +89,10 @@ bool usb_pen_x_take(app_event_t *ev) {
   bool got = usb_pen_queue_take(&queue, &u.pen);
   bool more = queue.count != 0;
   taskEXIT_CRITICAL(&mux);
-  if (got) *ev = u.ev;
+  if (got) {
+    *ev = u.ev;
+    app_pulse_x_pen_taken();
+  }
   if (more) post_token(); // sleep_ms and a waiting input_poll wake for the rest
   return got;
 }
@@ -134,12 +138,13 @@ void usb_pen_x_detach(void) {
   if (((had && o.n) || keys) && wanted) post_token();
   // the largest raw values seen: checks the assumed full-mode maxima (usb_pen.h)
   if (had)
-    evlog_add("Pen %04x:%04x gone, %lu pen frames, raw max x %u y %u p %u", was.vid, was.pid,
-              (unsigned long)was.pen_frames, was.raw_max_x, was.raw_max_y, was.raw_max_p);
+    evlog_add("Pen %04x:%04x gone, %lu pen frames, raw max x %u y %u p %u, dropped %lu", was.vid, was.pid,
+              (unsigned long)was.pen_frames, was.raw_max_x, was.raw_max_y, was.raw_max_p, (unsigned long)queue.dropped);
 }
 
 void usb_pen_x_report(usb_pen_iface_t role, const uint8_t *d, size_t len) {
   app_idle_x_note(); // any report, hover and tablet buttons too, is a person (also when the app asked for none)
+  app_pulse_x_pen_report();
   app_pen_event_t e;
   usb_cursor_out_t o = {};
   taskENTER_CRITICAL(&mux);

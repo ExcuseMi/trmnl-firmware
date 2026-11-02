@@ -228,6 +228,15 @@ static bool host_stop(uint32_t deadline, bool boost_on) {
       }
       usb_dev_log_stop(); // every client off before free_all and the library's uninstall
       break;
+    case USB_STOP_WAIT_GONE: { // the root port's off takes the devices and the hub off through the stack's own path
+      usb_host_lib_info_t info = {};
+      uint32_t start = millis();
+      while (usb_host_lib_info(&info) == ESP_OK && info.num_devices > 0 && millis() - start < USB_STOP_GONE_MS)
+        delay(10);
+      if (info.num_devices > 0) // free_all then marks it for release a second time (usb_port.h: ext_hub.c:509)
+        evlog_add("USB keys: %d device(s) still listed %d ms after the port went off", info.num_devices, USB_STOP_GONE_MS);
+      break;
+    }
     case USB_STOP_FREE_DEVICES: // lib_loop frees them (usb_host_device_free_all) and uninstalls: one wait for both
       lib_stop = true;
       break;

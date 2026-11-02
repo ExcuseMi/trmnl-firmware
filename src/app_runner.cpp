@@ -37,6 +37,7 @@
 #include "display_ink.h"
 #include "app_host.h"
 #include "app_idle_x.h"
+#include "app_pulse_x.h"
 #include "app_settings_store.h"
 #include "ble_keyboard.h"
 #include "evlog.h"
@@ -272,6 +273,7 @@ static bool app_supervise(PreferencesPersistence &persistence) {
       marked_input = true;
     }
     usb_drive_service();
+    app_pulse_x_poll(); // the pulse lines every APP_PULSE_MS (app_pulse_x.h)
     int turned = orientation_x_poll(millis());
     if (turned >= 0 && orientation_x_following()) {
       app_event_t ev = {};
@@ -350,6 +352,7 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   Log_event("Apps: starting %s", path);
   app_resume_starting(persistence, path);
   app_idle_x_begin(app_host.name);
+  app_pulse_x_begin();
   app_install_start(persistence, webshare_fs_root(), app_host.name); // a new version installed over Wi-Fi
 
   static esp_elf_t elf;
@@ -410,7 +413,8 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   evlog_crash_app(nullptr, 0);
   // why it ended: the user's long press, the app quitting by itself (return or exit), or its error
   app_idle_x_end();
-  const char *how = app_idle_closed_min ? "closed by the idle limit" : app_exit_asked ? "after a long press" : code == 0 ? "quit by itself" : "error";
+  app_pulse_x_end();
+  const char *how =app_idle_closed_min ? "closed by the idle limit" : app_exit_asked ? "after a long press" : code == 0 ? "quit by itself" : "error";
   Log_event("Apps: %s ended with %d (%s)", app_host.name, code, how);
   keyboards_end(); // the USB port back in device mode before anything else
   usb_port_give(usb_port_role()); // whatever still holds the PHY: serial again (usb_port_role.h)

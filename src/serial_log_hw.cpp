@@ -3,8 +3,11 @@
 
 #include <Arduino.h>
 #include <esp_log.h>
+#include <idf_log_line.h>
 #include <serial_hold.h>
 #include <stdio.h>
+
+#include "evlog.h"
 
 static size_t to_serial(void *, const uint8_t *b, size_t n) { return Serial.write(b, n); }
 
@@ -19,8 +22,25 @@ static HeldSerial held;
 Print &serial_log_out(void) { return held; }
 
 static vprintf_like_t idf_prev;
+static idf_log_rate_t rate;
+
+// ESP-IDF's own E and W lines also go into the event log (idf_log_line.h): in USB host mode the serial port has no
+// reader, and what the USB stack says about a hub port or a failed transfer is the only trace of a device that left
+static void keep_idf_line(const char *fmt, va_list ap) {
+  char line[160], kept[IDF_LOG_LINE_MAX + 1];
+  va_list copy;
+  va_copy(copy, ap);
+  vsnprintf(line, sizeof(line), fmt, copy);
+  va_end(copy);
+  if (!idf_log_line_keep(line, kept, sizeof(kept))) return;
+  unsigned held_back = 0;
+  if (!idf_log_rate_allow(&rate, millis(), &held_back)) return;
+  if (held_back) evlog_add("idf: %u more lines in the last minute not kept", held_back);
+  evlog_add("idf: %s", kept);
+}
 
 static int idf_vprintf(const char *fmt, va_list ap) {
+  keep_idf_line(fmt, ap);
   if (serial_hold_on()) return 0;
   return idf_prev ? idf_prev(fmt, ap) : vprintf(fmt, ap);
 }

@@ -370,7 +370,9 @@ void test_host_mode_ends_with_the_boost_off_last() {
   for (int s = USB_STOP_CLOSE_HANDLES; s <= USB_STOP_BOOST_OFF; s++) TEST_ASSERT_TRUE(stop_at((usb_stop_step_t)s) >= 0);
   TEST_ASSERT_TRUE(stop_at(USB_STOP_CLOSE_HANDLES) < stop_at(USB_STOP_PORT_OFF));
   TEST_ASSERT_TRUE(stop_at(USB_STOP_PORT_OFF) < stop_at(USB_STOP_CLIENTS_OFF)); // the HID driver's devices go first
-  TEST_ASSERT_TRUE(stop_at(USB_STOP_CLIENTS_OFF) < stop_at(USB_STOP_FREE_DEVICES)); // free_all wants no clients
+  TEST_ASSERT_TRUE(stop_at(USB_STOP_CLIENTS_OFF) < stop_at(USB_STOP_WAIT_GONE)); // free_all wants no clients
+  // the hub is freed by the stack's own path first: free_all on a hub still listed releases it a second time
+  TEST_ASSERT_TRUE(stop_at(USB_STOP_WAIT_GONE) < stop_at(USB_STOP_FREE_DEVICES));
   TEST_ASSERT_TRUE(stop_at(USB_STOP_FREE_DEVICES) < stop_at(USB_STOP_HOST_OFF));
   TEST_ASSERT_EQUAL(USB_STOP_STEPS - 1, stop_at(USB_STOP_BOOST_OFF));
 }

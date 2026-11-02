@@ -169,5 +169,6 @@ usb_boost_log_t usb_boost_result(usb_boost_t *b, uint32_t now_ms, bool ok) {
   return b->tries == USB_BOOST_FAST_TRIES ? USB_BOOST_LOG_FAILED : USB_BOOST_LOG_NONE;
 }
 
-const usb_stop_step_t usb_stop_plan[USB_STOP_STEPS] = {USB_STOP_CLOSE_HANDLES, USB_STOP_PORT_OFF,  USB_STOP_CLIENTS_OFF,
-                                                        USB_STOP_FREE_DEVICES,  USB_STOP_HOST_OFF, USB_STOP_BOOST_OFF};
+const usb_stop_step_t usb_stop_plan[USB_STOP_STEPS] = {USB_STOP_CLOSE_HANDLES, USB_STOP_PORT_OFF, USB_STOP_CLIENTS_OFF,
+                                                        USB_STOP_WAIT_GONE,     USB_STOP_FREE_DEVICES, USB_STOP_HOST_OFF,
+                                                        USB_STOP_BOOST_OFF};

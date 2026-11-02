@@ -156,9 +156,14 @@ typedef enum {
   USB_STOP_CLOSE_HANDLES, // our HID interfaces closed
   USB_STOP_PORT_OFF, // the root port off: the devices and hubs gone through the stack, VBUS still on
   USB_STOP_CLIENTS_OFF, // the HID driver (once its devices are gone) and the device log deregister
+  USB_STOP_WAIT_GONE, // until the library lists no device (USB_STOP_GONE_MS at most): the hub freed by its own path
   USB_STOP_FREE_DEVICES, // usb_host_device_free_all, until ALL_FREE
   USB_STOP_HOST_OFF, // usb_host_uninstall, the PHY given back
   USB_STOP_BOOST_OFF, // VBUS off
 } usb_stop_step_t;
-#define USB_STOP_STEPS 6
+#define USB_STOP_STEPS 7
+// free_all marks every hub still listed for release a second time (ext_hub_mark_all_free) while the root port's
+// off already released it through ext_hub_dev_gone: with a hub whose children are still being freed that is the
+// double release of 2026-11-02 (fw-usb25, #176: IllegalInstruction at ext_hub.c:509 on "no device, back to serial")
+#define USB_STOP_GONE_MS 500
 extern const usb_stop_step_t usb_stop_plan[USB_STOP_STEPS];

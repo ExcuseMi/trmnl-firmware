@@ -52,6 +52,7 @@
 #include "app_settings_store.h"
 #include "x_devset_x.h"
 #include "app_idle_x.h"
+#include "app_pulse_x.h"
 #include "app_settings_x.h"
 #include "kbd_layout_x.h"
 #include "displayed_image.h"
@@ -107,13 +108,16 @@ static int screen_refresh(const app_rect_t *rect, app_refresh_t how) {
   if (plan.kind == INK_PLAN_QUEUE) return display_ink_request(r.y, r.y + r.h - 1); // returns at once
   int rc = plan.wait_idle ? display_ink_wait_idle(DISPLAY_INK_WAIT_MS) : 0; // in the order the app asked
   if (rc) Log_error("app %s: refresh after a stuck ink update", app_host.name);
+  const uint32_t t0 = millis();
   panel_lock lock;
+  const uint32_t locked = millis();
   if (app_host.screen_held) return 0; // the pairing screen is up; it puts the app's pixels back when done
   if (plan.kind == INK_PLAN_PARTIAL) {
     rc = bbep.partialUpdate(true, r.y, r.y + r.h - 1);
   } else {
     rc = bbep.fullUpdate(CLEAR_FAST, true, rect ? &r : nullptr);
   }
+  app_pulse_x_refresh(locked - t0, millis() - t0); // the pulse line: what a refresh costs (app_pulse_x.h)
   return rc == BBEP_SUCCESS ? 0 : APP_EIO;
 }
 
