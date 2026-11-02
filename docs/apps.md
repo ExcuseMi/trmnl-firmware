@@ -460,7 +460,7 @@ flash a file system image to a real X (it replaces those files); `test/sim/flash
 
 | Step | Do |
 |---|---|
-| on the X | menu, Apps..., Receive over USB... (shows "Waiting for an app on the USB cable"; any tap or 2 min idle ends it) |
+| on the X | nothing: awake with the cable in (see "Update over the cable"). The menu way still works: Apps..., Receive over USB... (any tap or 2 min idle ends it) |
 | on the computer | `python3 apps/upload.py /dev/ttyACM0 apps/build/hello.elf` (venv with `pyserial`); prints `sent hello.elf` |
 
 | Protocol (`lib/trmnl/include/app_upload.h`) | |
@@ -470,6 +470,20 @@ flash a file system image to a real X (it replaces those files); `test/sim/flash
 | data | 64-byte blocks, each answered `TAPP ACK <bytes>` (one USB packet; the serial RX buffer drops what does not fit) |
 | end | `TAPP OK <name>.elf`, or `TAPP ERR short` (no byte for 5 s) / `bad crc` / `write failed`: the old app stays |
 | writes | `/apps/.upload.tmp`; after size and CRC match, `app_install_commit` (the one install path, shared with Install via Wi-Fi): the loader's ELF check (`TAPP ERR refused: <reason>`), the old app kept as `.bak` until the new one started, then the rename. A leftover temp file is removed at the next start |
+
+## Update over the cable
+
+No menu: `python3 apps/upload.py /dev/ttyACM0 apps/build/hello.elf [more.elf]` (same command, same protocol) works whenever the X is awake with the cable in: a TRMNL screen, any firmware menu, or an app running. Asleep: touch the bar; upload.py asks again for 30 s. The port is opened quietly (DTR/RTS low, no reset).
+
+| X is | Result |
+|---|---|
+| no app running | installed at once (`Cable: installed`) |
+| the same app running | asked to exit like a long press (it saves), file replaced, started again as after a menu start (`Cable: replaced`). Not out in time: replaced, then the usual restart |
+| another app running | keeps running; the new file is installed. No toast: the panel belongs to the running app |
+| USB host mode (keyboard, pen) or the USB drive has the port | `TAPP ERR busy: ...`; nothing written. esptool/flashing is the ROM loader: the firmware does not run then |
+| bad ELF, bad CRC, short, no space | `TAPP ERR ...` after the data; the temp file goes, the old app is untouched. The ELF is checked (`app_elf_check`) before the running app is asked to exit |
+
+Deep sleep waits for an upload under way (60 s at most; a stuck transfer ends after 5 s without a byte). While an app runs the supervise loop receives the file (a long press is handled after it, seconds). Code: `lib/trmnl/src/app_cable.cpp` (decisions, tests `test/test_app_cable`), `src/app_cable_x.cpp`; upload.py retry test `python3 test/upload_py/test_upload_retry.py`. Event log lines start with `Cable:`.
 
 ## Crash in an app
 

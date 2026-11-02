@@ -2,8 +2,11 @@
 
   python3 apps/upload.py <port> apps/build/hello.elf [more.elf ...]
 
-On the X first: menu, Apps..., Receive over USB... . Only /apps/<name>.elf is written; the file system with
-TRMNL's cached screens stays. Protocol: lib/trmnl/include/app_upload.h. Needs pyserial (in a venv).
+The X only has to be awake with the cable in: on a TRMNL screen, in a menu or with an app running, no menu needed
+(touch the bar first if it sleeps; this script keeps asking for 30 s). Not running: installed at once. The same app
+running: it is asked to exit, replaced and started again. Another app running: it keeps running. Only
+/apps/<name>.elf is written; the file system with TRMNL's cached screens stays. Protocol:
+lib/trmnl/include/app_upload.h. Needs pyserial (in a venv).
 """
 import os
 import sys
@@ -13,6 +16,7 @@ import zlib
 BLOCK = 64  # APP_UPLOAD_BLOCK
 REPLY_S = 10
 HEADER_TRY_S = 4  # wait for READY this long before sending the header again
+WAKE_S = 30  # keep sending the header this long while the X does not answer at all (asleep, restarting)
 SETTLE_S = 0.5  # after opening the port
 
 
@@ -20,13 +24,17 @@ class UploadError(Exception):
     pass
 
 
-def upload(name, data, write, read_reply):
+def upload(name, data, write, read_reply, wake_s=WAKE_S):
     """Sends one file. write(bytes); read_reply(timeout_s) returns the next "TAPP ..." line or None."""
     header = b"TAPP PUT %s %d %08x\n" % (name.encode(), len(data), zlib.crc32(data) & 0xFFFFFFFF)
-    for attempt in (1, 2):  # the X skips noise before "TAPP ", but the first header can still be lost: once more
+    # The X skips noise before "TAPP ", but a header can be lost or the X asleep: ask again only while NOTHING
+    # answers (an awake X replies at once; an ERR is an answer and ends it)
+    tries = max(2, int(wake_s // HEADER_TRY_S))
+    reply = None
+    for attempt in range(1, tries + 1):
         write(header)
-        reply = read_reply(REPLY_S if attempt == 2 else HEADER_TRY_S)
-        if reply == "TAPP READY" or attempt == 2:
+        reply = read_reply(REPLY_S if attempt == tries else HEADER_TRY_S)
+        if reply is not None:
             break
     expect(reply, "READY")
     sent = 0

@@ -4,6 +4,7 @@
 
 #include <LittleFS.h>
 #include "app_heap.h"
+#include <app_cable.h>
 #include <app_elf_check.h>
 #include <app_install.h>
 #include <app_keys.h>
@@ -32,6 +33,7 @@
 
 #include <algorithm>
 
+#include "app_cable_x.h"
 #include "app_host.h"
 #include "app_idle_x.h"
 #include "app_settings_store.h"
@@ -166,14 +168,22 @@ static void serial_command(const char *line) {
 }
 
 static app_serial_t serial_in;
+static app_cable_line_t cable_in; // the same bytes, for a "TAPP PUT" header (longer than app_serial's line)
 
 // Reads the serial port: only "TKEY <text>" lines type into the app (a terminal or the sim's tests); TAPP commands and
 // every other byte never reach it as keys (device, b0ff008: "TAPP EVLOG" was typed into the writer's document)
 static void pump_keys(void) {
   app_event_t ev;
   while (Serial.available() > 0) {
+    if (app_cable_busy()) return; // an upload is being received (app_cable_x.cpp): not keys
     int b = Serial.read();
     if (b < 0) break;
+    const char *put;
+    if (app_cable_line_feed(&cable_in, (uint8_t)b, &put)) {
+      app_cable_x_header(put); // receives the whole file; the app keeps running meanwhile
+      app_serial_init(&serial_in);
+      continue;
+    }
     uint8_t key;
     const char *line;
     app_serial_out_t o = app_serial_feed(&serial_in, (uint8_t)b, &key, &line);
@@ -279,6 +289,17 @@ static bool app_supervise(PreferencesPersistence &persistence) {
       exit_asked = millis();
       app_exit_asked = true;
     }
+    if (!exit_asked && app_cable_x_exit_wanted()) {
+      // The same app was uploaded over the cable: like a long press (it saves), then replaced and started again
+      Log_event("Apps: update over the cable - asking %s to exit", app_host.name);
+      app_event_t ev = {};
+      ev.type = APP_EVENT_EXIT;
+      xQueueReset(app_host.events);
+      usb_pen_x_token_taken();
+      post(ev);
+      exit_asked = millis();
+      app_exit_asked = true;
+    }
     if (!exit_asked && app_idle_x_poll() == APP_IDLE_EXPIRED) {
       // Like a long press, and not resumed after the next wake: a timed-out app is quit, not interrupted
       app_idle_closed_min = app_idle_x_minutes();
@@ -338,6 +359,7 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   app_settings_x_end(); // no form from the app before
   app_store_started(app_host.name); // values the phone page changed while it did not run: APP_EVENT_SETTINGS
   app_serial_init(&serial_in);
+  app_cable_line_init(&cable_in);
   Serial.begin(115200); // the keys of a terminal on the USB serial port
   touchbar_input_begin(app_host.name); // the tap that started it is not the app's
   orientation_x_begin();
@@ -362,6 +384,8 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
     app_resume_ended(persistence);
     evlog_crash_app(nullptr, 0);
     evlog_add("Apps: %s did not exit within %d ms, restarting", app_host.name, APP_EXIT_GRACE_MS);
+    char updated[APPS_PATH_MAX];
+    app_cable_x_finish(updated, sizeof(updated)); // a waiting cable update is put in place before the restart
     evlog_flush(false);
     delay(100);
     ESP.restart();
@@ -388,6 +412,11 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   vSemaphoreDelete(app_host.panel);
   app_host.panel = nullptr;
   app_resume_ended(persistence);
+  char updated[APPS_PATH_MAX];
+  if (app_cable_x_finish(updated, sizeof(updated)) && code == 0 && app_path_name(updated, next, next_len)) {
+    next_arg[0] = '\0'; // an update over the cable: the same app again, as after a menu start
+    return true;
+  }
   if (code != 0) {
     char what[48];
     snprintf(what, sizeof(what), "ended with error %d", code);

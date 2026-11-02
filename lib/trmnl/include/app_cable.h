@@ -38,3 +38,6 @@ bool app_cable_line_feed(app_cable_line_t *l, unsigned char b, const char **head
 // Bytes of an upload may reach the app's key reader or the menu: while an upload is received nothing else reads the port
 void app_cable_busy_set(bool busy);
 bool app_cable_busy(void);
+
+// An upload under way holds back deep sleep this long at most (a host on the cable, a stuck transfer ends by its own idle timeout)
+#define APP_CABLE_SLEEP_HOLD_MS 60000

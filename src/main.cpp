@@ -6,6 +6,7 @@
 #include "qa.h"
 
 #ifdef BOARD_TRMNL_X
+#include "app_cable_x.h"
 #include "display.h"
 #include "esp_sleep.h"
 #include "filesystem.h"
@@ -64,6 +65,7 @@ void setup() {
   }
 #endif // NO_QA
 
+  app_cable_x_start(); // apps over the USB cable while the X is awake
   bl_init();
 }
 #else // TRMNL OG setup()

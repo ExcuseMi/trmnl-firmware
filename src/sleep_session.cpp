@@ -2,6 +2,7 @@
 #include "evlog.h"
 #include "usb_port_role.h"
 #endif
+#include <app_cable.h>
 #include <Arduino.h>
 #include <ArduinoLog.h>
 #include <WiFi.h>
@@ -40,6 +41,8 @@
  * @return none
  */
 void goToSleep(void) {
+  // A cable upload under way (app_cable_x.cpp) finishes first, at most APP_CABLE_SLEEP_HOLD_MS
+  for (uint32_t t0 = millis(); app_cable_busy() && millis() - t0 < APP_CABLE_SLEEP_HOLD_MS;) delay(50);
   // An app owns the device until it exits (app_sleep_gate.h): no TRMNL sleep under it
   if (app_sleep_gate_ask("goToSleep") == APP_SLEEP_REFUSED) {
     if (app_sleep_gate_screen_name()) {

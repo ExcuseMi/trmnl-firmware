@@ -15,12 +15,12 @@
 #include <algorithm>
 #include <string.h>
 
+#include "app_receive.h"
 #include "webshare.h" // webshare_fs_root
 
 #define RECEIVE_IDLE_MS (10u * 60u * 1000u) // no upload started for this long: back to the menu
 
-static void reply(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-static void reply(const char *fmt, ...) {
+void apps_reply(const char *fmt, ...) {
   char line[160]; // "ERR bad header: got" and 32 bytes in hex fit
   va_list ap;
   va_start(ap, fmt);
@@ -59,7 +59,7 @@ static bool read_line(char *line, size_t cap, uint32_t idle_ms, bool (*cancel)(v
 }
 
 // The complete upload in APP_UPLOAD_TMP becomes the app the same way as an Install via Wi-Fi: app_install_commit
-static app_upload_result_t install(const app_upload_header_t &h, char *reason, size_t reason_len) {
+app_upload_result_t apps_install_tmp(const app_upload_header_t &h, char *reason, size_t reason_len) {
   uint8_t *buf = (uint8_t *)heap_caps_malloc(h.size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   size_t free_mem = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   app_install_result_t rc = app_install_commit(webshare_fs_root(), APP_UPLOAD_TMP + 1, h.path + 1, h.size, buf,
@@ -70,13 +70,13 @@ static app_upload_result_t install(const app_upload_header_t &h, char *reason, s
                                                                                       : APP_UPLOAD_WRITE_FAILED;
 }
 
-// The data of one upload into APP_UPLOAD_TMP, then installed. `reason`: why the ELF check refused it
-static app_upload_result_t receive_data(const app_upload_header_t &h, char *reason, size_t reason_len) {
-  reason[0] = '\0';
+// The data of one upload into APP_UPLOAD_TMP, size and CRC checked; the old app is untouched. On a failure the
+// temporary file is gone and the log says why
+app_upload_result_t apps_receive_tmp(const app_upload_header_t &h) {
   LittleFS.remove(APP_UPLOAD_TMP);
   File f = LittleFS.open(APP_UPLOAD_TMP, "w");
   if (!f) return APP_UPLOAD_WRITE_FAILED;
-  reply("READY");
+  apps_reply("READY");
   static uint8_t buf[APP_UPLOAD_BLOCK];
   uint32_t got = 0, crc = 0, in_block = 0, last = millis();
   bool write_failed = false;
@@ -95,18 +95,27 @@ static app_upload_result_t receive_data(const app_upload_header_t &h, char *reas
     got += n;
     in_block += n;
     if (in_block == APP_UPLOAD_BLOCK && got < h.size) {
-      reply("ACK %lu", (unsigned long)got);
+      apps_reply("ACK %lu", (unsigned long)got);
       in_block = 0;
     }
   }
   f.close();
   app_upload_result_t r = write_failed ? APP_UPLOAD_WRITE_FAILED : app_upload_check(&h, got, crc);
-  if (r == APP_UPLOAD_OK) r = install(h, reason, reason_len);
   if (r != APP_UPLOAD_OK) {
     LittleFS.remove(APP_UPLOAD_TMP);
-    Log_error("Apps: upload of %s failed: %s %s (%lu of %lu bytes)", h.path, app_upload_result_str(r), reason,
-              (unsigned long)got, (unsigned long)h.size);
+    Log_error("Apps: upload of %s failed: %s (%lu of %lu bytes)", h.path, app_upload_result_str(r), (unsigned long)got,
+              (unsigned long)h.size);
   }
+  return r;
+}
+
+// Menu mode: the data, then installed. `reason`: why the ELF check refused it
+static app_upload_result_t receive_data(const app_upload_header_t &h, char *reason, size_t reason_len) {
+  reason[0] = '\0';
+  app_upload_result_t r = apps_receive_tmp(h);
+  if (r != APP_UPLOAD_OK) return r;
+  r = apps_install_tmp(h, reason, reason_len);
+  if (r != APP_UPLOAD_OK) Log_error("Apps: install of %s failed: %s %s", h.path, app_upload_result_str(r), reason);
   return r;
 }
 
@@ -135,12 +144,12 @@ int apps_receive(bool (*cancel)(void)) {
     if (r == APP_UPLOAD_OK) r = receive_data(h, reason, sizeof(reason));
     if (r != APP_UPLOAD_OK) {
       Log_info("Apps: upload refused: %s%s%s", app_upload_result_str(r), reason[0] ? ": " : "", reason);
-      reply("ERR %s%s%s", app_upload_result_str(r), reason[0] ? ": " : "", reason);
+      apps_reply("ERR %s%s%s", app_upload_result_str(r), reason[0] ? ": " : "", reason);
       continue;
     }
     received++;
     Log_info("Apps: received %s, %lu bytes", h.path, (unsigned long)h.size);
-    reply("OK %s", h.path + sizeof(APPS_DIR));
+    apps_reply("OK %s", h.path + sizeof(APPS_DIR));
   }
   Log_info("Apps: upload mode ended, %d received", received);
   return received;
