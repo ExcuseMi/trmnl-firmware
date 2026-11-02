@@ -27,6 +27,18 @@ void test_plan_host_mode_and_drive_get_an_error() {
   TEST_ASSERT_NOT_NULL(strstr(app_cable_refusal(USB_ROLE_DRIVE), "drive"));
 }
 
+// Owner's X 2026-11-02: a bad header while an update waited for its app to exit removed the waiting file
+void test_header_while_an_update_waits_never_touches_its_file() {
+  TEST_ASSERT_EQUAL(APP_CABLE_HDR_KEEP_WAITING, app_cable_header_plan(true, APP_UPLOAD_BAD_HEADER));
+  TEST_ASSERT_EQUAL(APP_CABLE_HDR_KEEP_WAITING, app_cable_header_plan(true, APP_UPLOAD_NO_SPACE));
+  TEST_ASSERT_EQUAL(APP_CABLE_HDR_KEEP_WAITING, app_cable_header_plan(true, APP_UPLOAD_OK));
+}
+
+void test_header_with_nothing_waiting() {
+  TEST_ASSERT_EQUAL(APP_CABLE_HDR_RECEIVE, app_cable_header_plan(false, APP_UPLOAD_OK));
+  TEST_ASSERT_EQUAL(APP_CABLE_HDR_REFUSE, app_cable_header_plan(false, APP_UPLOAD_BAD_HEADER));
+}
+
 static const char *feed(app_cable_line_t *l, const char *s) {
   const char *h = nullptr;
   for (; *s; s++)
@@ -105,5 +117,7 @@ int main(int, char **) {
   RUN_TEST(test_header_of_full_length_is_seen_after_noise);
   RUN_TEST(test_other_lines_and_overlong_noise_are_not_headers);
   RUN_TEST(test_busy_flag);
+  RUN_TEST(test_header_while_an_update_waits_never_touches_its_file);
+  RUN_TEST(test_header_with_nothing_waiting);
   return UNITY_END();
 }

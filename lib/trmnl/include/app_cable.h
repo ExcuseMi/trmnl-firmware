@@ -21,6 +21,16 @@ typedef enum {
 // What to do with a received and checked upload of `path` (/apps/<name>.elf). `running`: the app running now or nullptr
 app_cable_action_t app_cable_plan(usb_role_t role, const char *running, const char *path);
 
+// A header, parsed as `parsed`, while an update may wait in APP_UPLOAD_TMP for its app to exit (`pending`)
+typedef enum {
+  APP_CABLE_HDR_RECEIVE,       // nothing waits, the header is good: receive into APP_UPLOAD_TMP
+  APP_CABLE_HDR_REFUSE,        // nothing waits, the header is bad: TAPP ERR (a temp file there is stale)
+  APP_CABLE_HDR_KEEP_WAITING,  // an update waits: TAPP ERR, good header or bad, and its file is NOT touched
+} app_cable_header_plan_t;
+
+// Owner's X 2026-11-02: a bad header while an update waited removed the waiting file (the update was lost)
+app_cable_header_plan_t app_cable_header_plan(bool pending, app_upload_result_t parsed);
+
 // The reason after "TAPP ERR " for APP_CABLE_REFUSE_PORT
 const char *app_cable_refusal(usb_role_t role);
 

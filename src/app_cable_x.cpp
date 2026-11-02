@@ -64,12 +64,13 @@ static void upload(const char *header) {
   app_upload_result_t r = pending ? app_upload_parse(header, UINT64_MAX, &h) // the waiting file is not stale
                                   : apps_parse_header(header, &h, reason, sizeof(reason));
   usb_role_t role = usb_port_role();
-  if (r == APP_UPLOAD_OK && pending) {
-    apps_reply("ERR busy: an update waits for its app to exit");
-    r = APP_UPLOAD_WRITE_FAILED;
+  app_cable_header_plan_t plan = app_cable_header_plan(pending, r);
+  if (plan == APP_CABLE_HDR_KEEP_WAITING) { // good or bad, this header never touches the waiting file
+    if (r == APP_UPLOAD_OK) apps_reply("ERR busy: an update waits for its app to exit");
+    else fail(r, reason);
     goto done;
   }
-  if (r == APP_UPLOAD_OK && role != USB_ROLE_SERIAL) {
+  if (plan == APP_CABLE_HDR_RECEIVE && role != USB_ROLE_SERIAL) {
     Log_info("Apps: cable upload refused, %s", app_cable_refusal(role));
     evlog_add("Cable: upload refused, %s", app_cable_refusal(role));
     apps_reply("ERR %s", app_cable_refusal(role));

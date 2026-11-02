@@ -12,6 +12,11 @@ app_cable_action_t app_cable_plan(usb_role_t role, const char *running, const ch
   return APP_CABLE_INSTALL_KEEP_RUNNING;
 }
 
+app_cable_header_plan_t app_cable_header_plan(bool pending, app_upload_result_t parsed) {
+  if (pending) return APP_CABLE_HDR_KEEP_WAITING;
+  return parsed == APP_UPLOAD_OK ? APP_CABLE_HDR_RECEIVE : APP_CABLE_HDR_REFUSE;
+}
+
 const char *app_cable_refusal(usb_role_t role) {
   return role == USB_ROLE_DRIVE ? "busy: the USB drive has the port" : "busy: USB host mode has the port";
 }
