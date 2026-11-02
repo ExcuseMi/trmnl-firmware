@@ -42,8 +42,10 @@ void test_the_call_stays_in_its_slot_when_the_table_grows() {
   TEST_ASSERT_EQUAL(APP_API_SLOT(57), offsetof(app_api_t, device_setting_set));
   TEST_ASSERT_EQUAL(APP_API_SLOT(58), offsetof(app_api_t, device_page_open)); // 2.12 (the phone page)
   TEST_ASSERT_EQUAL(APP_API_SLOT(59), offsetof(app_api_t, app_idle_hold)); // 2.13 (idle hold)
-  TEST_ASSERT_EQUAL(APP_API_SLOT(60), sizeof(app_api_t));
-  TEST_ASSERT_EQUAL(13, APP_API_MINOR);
+  TEST_ASSERT_EQUAL(APP_API_SLOT(60), offsetof(app_api_t, screen_busy)); // 2.14 (fast ink)
+  TEST_ASSERT_EQUAL(APP_API_SLOT(61), sizeof(app_api_t));
+  TEST_ASSERT_EQUAL(14, APP_API_MINOR);
+  TEST_ASSERT_EQUAL(2, APP_REFRESH_INK); // older firmware takes it for a full refresh (not PARTIAL, which is 0)
 }
 
 // API 2.5: screen_orientation keeps its two values, from the accelerometer once it has a reading

@@ -39,6 +39,7 @@ The firmware calls `int app_main(const app_api_t *api)`. Return 0 when done, any
 | other apps' files (API 2.8) | `file_list_apps(cb, ctx)`, `file_list_app(app, dir, cb, ctx)` (callback also gets the modification time), `file_open_app(app, path)`: read only, see "Other apps' files" below. Check `api->size >= APP_API_SLOT(53)` first |
 | finding services (API 2.10) | `net_browse("_ipp._tcp", timeout_ms, cb, ctx)`: see "Finding services" below. Check `api->size >= APP_API_SLOT(56)` first |
 | launching an app (API 2.9) | `app_launch(app, arg)`, `app_arg(out, n)`: see "Launching an app" below. Check `api->size >= APP_API_SLOT(55)` first |
+| fast ink (API 2.14) | `screen_refresh(rect, APP_REFRESH_INK)` returns at once, `screen_busy()`: see "Fast ink" below. Check `api->size >= APP_API_SLOT(61)` first |
 
 Errors are negative `APP_E*` values.
 
@@ -287,6 +288,24 @@ Receive only, for the ELRS TX backpack's telemetry (the FPV app). Glue `src/espn
 | stop | callback off, `esp_now_deinit`, the eFuse MAC and the old protocol back, Wi-Fi off. The runner calls it when the app ends, whatever the reason; a crash or a restart needs nothing: MAC and protocol live in the driver's RAM only |
 | event log | `ESP-NOW: on, channel N (receive only)`, `ESP-NOW: refused, the radio is held by <who>`, `ESP-NOW: N frames dropped (queue full or too long)` (at most every 10 s), `ESP-NOW: off, channel N, N frames, N dropped`, `ESP-NOW: start failed at <step> (0x<esp_err>)`, `Net: refused, ESP-NOW holds the radio` |
 | not checked on a device | whether `esp_wifi_set_mac` takes the MAC with the station started (else it stops, sets, starts), frames from a real backpack |
+
+## Fast ink (API 2.14)
+
+`APP_REFRESH_INK` is for small white/black changes drawn live (a pen stroke, a cursor). Logic `lib/trmnl/src/ink_queue.cpp`, task `src/display_ink.cpp`.
+
+An app can tell the firmware knows INK by `api->size >= APP_API_SLOT(61)`.
+
+| what | how |
+|---|---|
+| call | `screen_refresh(rect, APP_REFRESH_INK)` queues rows `rect.y .. rect.y + h - 1` and returns at once (0, or `APP_EIO` from an earlier ink update that failed). Older firmware (no `APP_API_SLOT(61)`) gives a full refresh: check the size first |
+| passes | `APP_INK_PASSES` (2) instead of PARTIAL's 3, plus the driver's neutral scan. Every pass scans the whole panel (~51 ms on the X) whatever the rows: an ink update costs about 150 ms, PARTIAL about 200 ms. Columns are not windowed (FastEPD has no such call) |
+| queue | a task on core 0 runs one update at a time; requests that come meanwhile merge into one range (first to last row) that runs next |
+| framebuffer | no copy: the driver reads each byte once at its start and keeps it as the panel's state, so drawing during an update is safe; what changed after it shows in the next one. Ask again for rows drawn after a request |
+| order | FULL, PARTIAL and `screen_set_mode` wait until the queue is idle (at most 3 s); the runner waits too when the app ends |
+| `screen_busy()` | 1 while ink updates are queued or running, 0 when the panel shows them |
+| ghosting | fewer passes leave a grayer black and ghosts where ink was erased. The app cleans with `APP_REFRESH_FULL` (Sketch: after idle) |
+| gray screen | INK gets a full refresh, as PARTIAL does |
+| not checked on a device | the black after 1 and 2 passes, the time per update, whether core 0's radio tasks delay rows during a scan |
 
 ## Touch bar and position (API 2.5)
 

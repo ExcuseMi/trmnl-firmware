@@ -34,6 +34,7 @@
 #include <algorithm>
 
 #include "app_cable_x.h"
+#include "display_ink.h"
 #include "app_host.h"
 #include "app_idle_x.h"
 #include "app_settings_store.h"
@@ -405,6 +406,7 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   webshare_stop(); // the page never outlives the app
   app_settings_x_end(); // the settings form goes with the app
   espnow_app_stop(); // nor ESP-NOW: the original MAC back, the radio off (a crash restarts with the eFuse MAC)
+  display_ink_wait_idle(DISPLAY_INK_WAIT_MS); // the app's last ink, before the panel lock goes and TRMNL draws
   app_host_close_files();
   esp_elf_deinit(&elf);
   vQueueDelete(app_host.events);

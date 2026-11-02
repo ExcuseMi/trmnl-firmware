@@ -19,6 +19,7 @@
 #include <esp_heap_caps.h>
 #include <esp_http_client.h>
 #include <http_open_error.h>
+#include <ink_queue.h>
 #include <kbd_layout.h>
 #include <net_browse.h>
 #include <mbedtls/asn1.h>
@@ -54,6 +55,7 @@
 #include "app_settings_x.h"
 #include "kbd_layout_x.h"
 #include "displayed_image.h"
+#include "display_ink.h"
 #include "espnow_app.h"
 #include "ble_keyboard.h"
 #include "evlog.h"
@@ -83,6 +85,7 @@ struct panel_lock {
 
 static uint8_t *screen_set_mode(app_screen_mode_t mode) {
   if (mode != APP_SCREEN_1BIT && mode != APP_SCREEN_GRAY4) return nullptr;
+  display_ink_wait_idle(DISPLAY_INK_WAIT_MS); // the ink task reads the framebuffer the mode change clears
   panel_lock lock;
   if (bbep.setMode(mode == APP_SCREEN_1BIT ? BB_MODE_1BPP : BB_MODE_4BPP) != BBEP_SUCCESS) return nullptr;
   screen_mode = mode;
@@ -99,16 +102,22 @@ static int screen_refresh(const app_rect_t *rect, app_refresh_t how) {
     }
     r = {rect->x, rect->y, rect->w, rect->h};
   }
-  int rc;
+  const ink_plan_t plan = ink_plan(how, screen_mode == APP_SCREEN_1BIT);
+  if (plan.kind == INK_PLAN_BAD) return APP_EINVAL;
+  if (plan.kind == INK_PLAN_QUEUE) return display_ink_request(r.y, r.y + r.h - 1); // returns at once
+  int rc = plan.wait_idle ? display_ink_wait_idle(DISPLAY_INK_WAIT_MS) : 0; // in the order the app asked
+  if (rc) Log_error("app %s: refresh after a stuck ink update", app_host.name);
   panel_lock lock;
   if (app_host.screen_held) return 0; // the pairing screen is up; it puts the app's pixels back when done
-  if (how == APP_REFRESH_PARTIAL && screen_mode == APP_SCREEN_1BIT) {
+  if (plan.kind == INK_PLAN_PARTIAL) {
     rc = bbep.partialUpdate(true, r.y, r.y + r.h - 1);
   } else {
     rc = bbep.fullUpdate(CLEAR_FAST, true, rect ? &r : nullptr);
   }
   return rc == BBEP_SUCCESS ? 0 : APP_EIO;
 }
+
+static int screen_busy(void) { return display_ink_busy(); }
 
 // ---- input, time, log ----
 
@@ -671,6 +680,7 @@ static const app_api_t table = {
     x_devset_get,    x_devset_set,
     device_page_open,
     app_idle_hold_call,
+    screen_busy,
 };
 
 const app_api_t *app_api_table(void) {
