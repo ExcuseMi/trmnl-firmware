@@ -194,13 +194,14 @@ def test_a_running_app_is_not_resumed_after_a_restart(device, elfs):
 
 def test_an_app_that_crashes_as_it_starts_is_not_started_again(device, elfs):
     sim = device({"/apps/crash.elf": elfs["crash"]})
-    # As if it had been running fine before a restart: due for resuming
+    # As if it had been running when the X went to sleep: due for resuming on the wake (since 2026-11-02 the only
+    # path that resumes; a restart goes home)
     asleep(sim)
     sim.set_pref("app_last", "string", "/apps/crash.elf")
     sim.set_pref("app_resume", "u8", "1")
     sim.set_pref("app_input", "u8", "1")  # input reached it (98cb631: else not resumed)
     t = since(sim)
-    sim.api("POST", "/reset")
+    sim.api("POST", "/wake")
     must_log(sim, r"Apps: resuming /apps/crash.elf", t, 120)
     must_log(sim, r"crash: crashing now", t)
     must_log(sim, r"Guru Meditation", t)
@@ -223,7 +224,7 @@ def test_a_missing_app_to_resume_gives_a_clean_error(device, elfs):
     sim.set_pref("app_resume", "u8", "1")
     sim.set_pref("app_input", "u8", "1")  # input reached it (98cb631: else not resumed)
     t = since(sim)
-    sim.api("POST", "/reset")
+    sim.api("POST", "/wake")
     must_log(sim, r"Apps: gone: file not found", t, 120)
     asleep(sim)
     assert sim.prefs().get("app_resume") == "0"
