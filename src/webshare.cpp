@@ -218,9 +218,8 @@ static int start_modem(void) {
   bool mdns_ok = false;
   int rc = webshare_modem_start(dev_host, S.ip, sizeof(S.ip), &mdns_ok);
   if (rc) return rc;
-  // without mDNS the X shows the address with the IP (docs/apps.md "Wi-Fi page on 5 GHz")
-  if (mdns_ok) snprintf(S.address, sizeof(S.address), "http://%s.local", dev_host);
-  else snprintf(S.address, sizeof(S.address), "http://%s", S.ip);
+  (void)mdns_ok; // the name may answer too, but phones without mDNS need the IP (ws_open_address)
+  ws_open_address(S.address, sizeof(S.address), APP_WEBSHARE_HOME, S.ip, WS_AP_URL);
   return 0;
 }
 
@@ -276,8 +275,8 @@ static int start_profile(app_webshare_mode_t requested, int profile) {
   } else {
     MDNS.end(); // the setup code started one with the device's own host name
     if (!MDNS.begin(dev_host)) Log_error("webshare: mDNS failed, use the address");
-    snprintf(S.address, sizeof(S.address), "http://%s.local", dev_host);
     snprintf(S.ip, sizeof(S.ip), "%s", WiFi.localIP().toString().c_str());
+    ws_open_address(S.address, sizeof(S.address), APP_WEBSHARE_HOME, S.ip, WS_AP_URL); // the IP: phones lack mDNS
   }
   if (rc == 0) {
     snprintf(S.url, sizeof(S.url), "http://%s/", S.ip);

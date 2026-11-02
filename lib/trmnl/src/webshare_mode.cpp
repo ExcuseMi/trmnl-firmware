@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "webshare_mode.h"
 
 bool ws_pick_mode(app_webshare_mode_t requested, bool home_wifi_up, app_webshare_mode_t *picked) {
@@ -28,4 +29,17 @@ const char *ws_refusal_reason(int rc) {
   case APP_EBUSY: return "busy (ESP-NOW holds the radio, or the last page through the modem is still closing)";
   }
   return "unexpected error";
+}
+
+bool ws_open_address(char *out, size_t n, app_webshare_mode_t mode, const char *ip, const char *ap_url) {
+  if (!out || !n) return false;
+  out[0] = '\0';
+  const char *src = mode == APP_WEBSHARE_AP ? ap_url : ip;
+  if (!src || !src[0]) return false;
+  int w = mode == APP_WEBSHARE_AP ? snprintf(out, n, "%s", src) : snprintf(out, n, "http://%s", src);
+  if (w < 0 || (size_t)w >= n) {
+    out[0] = '\0';
+    return false;
+  }
+  return true;
 }

@@ -522,6 +522,20 @@ void test_zip_refuses_too_many_or_long() {
 void setUp(void) {}
 void tearDown(void) {}
 
+// Owner 2026-11-02: the .local name did not open on the phone; the screen shows the IP
+void test_the_address_to_open_is_the_ip() {
+  char a[40];
+  TEST_ASSERT_TRUE(ws_open_address(a, sizeof(a), APP_WEBSHARE_HOME, "192.168.1.30", "http://4.3.2.1"));
+  TEST_ASSERT_EQUAL_STRING("http://192.168.1.30", a);
+  TEST_ASSERT_NULL(strstr(a, ".local"));
+  TEST_ASSERT_TRUE(ws_open_address(a, sizeof(a), APP_WEBSHARE_AP, "4.3.2.1", "http://4.3.2.1"));
+  TEST_ASSERT_EQUAL_STRING("http://4.3.2.1", a);
+  TEST_ASSERT_FALSE(ws_open_address(a, sizeof(a), APP_WEBSHARE_HOME, "", "http://4.3.2.1"));
+  TEST_ASSERT_EQUAL_STRING("", a);
+  TEST_ASSERT_FALSE(ws_open_address(a, 10, APP_WEBSHARE_HOME, "192.168.1.30", "http://4.3.2.1"));
+  TEST_ASSERT_EQUAL_STRING("", a);
+}
+
 int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
@@ -556,5 +570,6 @@ int main(int argc, char **argv) {
   RUN_TEST(test_zip_refuses_too_many_or_long);
   RUN_TEST(test_stop_drops_only_the_wifi_the_page_joined);
   RUN_TEST(test_each_refusal_has_its_own_reason);
+  RUN_TEST(test_the_address_to_open_is_the_ip);
   return UNITY_END();
 }

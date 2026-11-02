@@ -338,7 +338,7 @@ typedef struct {
   int32_t mode; // APP_WEBSHARE_HOME or APP_WEBSHARE_AP: what is in use
   char code[8]; // the 6 digits to type on the page, NUL-terminated
   char network[33]; // AP mode: the network to join (the device's name); empty otherwise
-  char address[40]; // what to open: "http://4.3.2.1" (AP) or "http://trmnl-x-bjrlat.local" (HOME)
+  char address[40]; // what to open: "http://4.3.2.1" (AP) or "http://192.168.1.30" (HOME: the IP, since 2026-11-02)
   char ip[16]; // the X's address (4.3.2.1 for the access point)
   char url[32]; // "http://<ip>/": show it as "Online at ..."
   char login_url[72]; // "http://<ip>/?t=<128-bit token>": for the QR. One login only, gone at stop or after 15 min;

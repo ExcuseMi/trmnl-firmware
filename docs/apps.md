@@ -200,7 +200,7 @@ Names, limits and times below are the defaults of "Configuration".
 | Default (`APP_WEBSHARE_AUTO`) | the saved home network, so the phone stays on its Wi-Fi; only if none is reachable the access point. `status.mode` says which. `APP_WEBSHARE_HOME` alone does not fall back (`APP_ENONET`) |
 | One-time link | `status.url` ("Online at ...") and `status.login_url` (`/?t=<128-bit token>`, for a QR): one login, 15 min, gone at stop, a wrong token counts like a wrong code, never logged (test reads the source). Typing the code works too. Changed in place: API 2 is not released |
 | AP mode | open network named like the device ("TRMNL-X-BJRLAT": its Wi-Fi host name, `webshare_host.h`; with only the board prefix, the last 3 MAC bytes are added), `http://4.3.2.1`, phones open it as a captive portal |
-| Home network | saved 2.4 GHz network, `http://<device name lowercase>.local` (e.g. `trmnl-x-bjrlat.local`, mDNS, also on the modem path) and the IP in `status.ip`; a saved 5 GHz network through the modem ("Wi-Fi page on 5 GHz") |
+| Home network | saved 2.4 GHz network, `status.address` is `http://<ip>` (since 2026-11-02: the `.local` name did not open on the owner's phone; mDNS still answers, also on the modem path); a saved 5 GHz network through the modem ("Wi-Fi page on 5 GHz") |
 | Code | 6 digits in `status.code`, the app shows it on the X's screen; no API works without a session from `POST /api/login`; 5 wrong codes lock 60 s (doubling), 15 stop the page |
 | Changes | need the `X-Writer` header (another site's form cannot send it) and the session cookie (SameSite=Strict) |
 | No silent overwrite | upload to `.webshare.tmp` in the target folder, renamed when all announced bytes arrived and the file on disk has that size; same bytes: nothing written; other bytes: saved as `title (web N).md`, the old file untouched; rename onto an existing name is refused |
@@ -222,7 +222,7 @@ device yet.
 | requests | `GET` / `POST`, request line 512 bytes (414), header lines over 1 KB skipped, 64 headers (431), body by `Content-Length` or chunked (a chunked upload: 411), form bodies up to 16 KB (413), `multipart/form-data` for `curl -F` (`ws_http_parse.h`, `ws_multipart.h`, test `test_ws_http`) |
 | answers | `AT+CIPSEND=<link>,<n>` pieces of 4 KB, one piece per link in turn; a file and the zip stream from the file system, never whole in RAM; a send that fails closes the link and the file |
 | uploads | written in 4 KB pieces as they arrive (several MB never sit in RAM), same rules as above |
-| name | `AT+MDNS=1,"<device name lowercase>","_http",80`: `http://<device name lowercase>.local`, the same name as on 2.4 GHz; when the modem refuses it the X shows `http://<ip>` (`status.address`) |
+| name | `AT+MDNS=1,"<device name lowercase>","_http",80`: `http://<device name lowercase>.local`, the same name as on 2.4 GHz; the X shows `http://<ip>` (`status.address`) either way |
 | the modem's UART | the page's task owns it: an app's `http_request` through the modem gives `APP_EBUSY` while the page runs on 5 GHz, `net_up` says up without a command |
 
 ### Files profile (API 2.3)

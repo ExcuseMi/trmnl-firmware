@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include <app_api.h>
 
@@ -16,3 +17,8 @@ bool ws_release_wifi_on_stop(app_webshare_mode_t mode, bool connected_before_sta
 
 // Why a start was refused, for the event log: one text per code (unknown codes share the last one)
 const char *ws_refusal_reason(int rc);
+
+// What the X shows to open (app_webshare_status_t.address): on the home network "http://<ip>", never the .local name
+// alone (owner 2026-11-02: "http://trmnl-x-....local" did not open on the phone, which has no mDNS); the access point
+// keeps its fixed address. False when it does not fit or `ip` is empty.
+bool ws_open_address(char *out, size_t n, app_webshare_mode_t mode, const char *ip, const char *ap_url);
