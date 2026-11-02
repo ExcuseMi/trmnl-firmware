@@ -23,3 +23,7 @@ void app_resume_starting(Persistence &p, const char *path) {
 void app_resume_started(Persistence &p) { p.writeBool(APP_RESUME_FLAG_KEY, true); }
 
 void app_resume_ended(Persistence &p) { p.writeBool(APP_RESUME_FLAG_KEY, false); }
+
+void app_resume_sleeping(Persistence &p, const char *running) {
+  if (!running || !running[0]) app_resume_ended(p);
+}

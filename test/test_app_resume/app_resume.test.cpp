@@ -56,6 +56,22 @@ void test_a_restart_goes_home_and_clears_the_resume() {
   TEST_ASSERT_EQUAL(APP_RESUME_NONE, app_resume_take(p, APP_RESET_SLEEP_WAKE, path, sizeof(path)));
 }
 
+// Owner 2026-11-02: a wake resumes only an app still running when the X slept (#93 to #94: Sketch ended by a long
+// press came back after the wake; the flag was set again after the long press)
+void test_a_wake_never_brings_back_an_app_that_was_not_running_at_sleep() {
+  MemoryPersistence p;
+  app_resume_starting(p, "/apps/trmnl-sketch.elf");
+  app_resume_input(p);
+  app_resume_started(p); // left set, as on the X
+  app_resume_sleeping(p, nullptr);
+  TEST_ASSERT_EQUAL(APP_RESUME_NONE, app_resume_take(p, APP_RESET_SLEEP_WAKE, path, sizeof(path)));
+  app_resume_starting(p, "/apps/trmnl-sketch.elf");
+  app_resume_input(p);
+  app_resume_started(p);
+  app_resume_sleeping(p, "trmnl-sketch"); // still running when it slept
+  TEST_ASSERT_EQUAL(APP_RESUME_GO, app_resume_take(p, APP_RESET_SLEEP_WAKE, path, sizeof(path)));
+}
+
 void test_an_ended_app_is_not_resumed() {
   MemoryPersistence p;
   app_resume_starting(p, "/apps/hello.elf");
@@ -109,6 +125,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_an_app_that_never_started_is_not_resumed);
   RUN_TEST(test_a_panic_or_watchdog_reset_ends_the_resuming);
   RUN_TEST(test_a_restart_goes_home_and_clears_the_resume);
+  RUN_TEST(test_a_wake_never_brings_back_an_app_that_was_not_running_at_sleep);
   RUN_TEST(test_an_ended_app_is_not_resumed);
   RUN_TEST(test_a_path_too_long_for_the_buffer_is_not_resumed);
   RUN_TEST(test_an_app_no_input_reached_is_not_resumed);

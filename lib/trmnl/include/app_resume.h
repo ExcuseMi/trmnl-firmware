@@ -39,6 +39,12 @@ void app_resume_starting(Persistence &p, const char *path);
 // The app has run for APP_RESUME_STARTED_MS: resume it after a restart
 void app_resume_started(Persistence &p);
 
+// The X goes to deep sleep with `running` (nullptr: none) on it. Only an app still running then is resumed on the
+// wake (owner 2026-11-02); one the person ended (long press, quit, idle close) never comes back: no app, flag cleared.
+// On the X the sleep gate refuses sleep under a running app, so today every sleep clears it (2026-11-02, #93 to #94:
+// Sketch ended by a long press came back after the wake).
+void app_resume_sleeping(Persistence &p, const char *running);
+
 // The app ended (returned, failed or was ended by the user): nothing to resume
 void app_resume_ended(Persistence &p);
 

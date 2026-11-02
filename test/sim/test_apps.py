@@ -1,5 +1,5 @@
 """The app loader on the simulated X: started from the menu, ended by a long press, refused when broken,
-resumed after a restart, and never resumed into a crash loop (docs/apps.md)."""
+never resumed after a restart (owner 2026-11-02), and never resumed into a crash loop (docs/apps.md)."""
 import re
 import struct
 
@@ -170,24 +170,25 @@ def test_an_app_that_ignores_the_long_press_is_ended_by_a_restart(device, elfs):
     assert count_logs(sim, r"stuck: running") == 1
 
 
-def test_a_running_app_is_resumed_after_a_restart(device, elfs):
+def test_a_running_app_is_not_resumed_after_a_restart(device, elfs):
+    # Owner decision 2026-11-02 ("it just restarts back into the sketch app, it shouldn't do that automatically"):
+    # a restart (power-on, esptool, watchdog or software reset) goes to the home screen, never into the last app.
+    # Before that date this test asked for the resume. The sim has no deep-sleep wake, the one case that may resume.
     sim = device({"/apps/hello.elf": elfs["hello"]})
     start = start_app(sim, ["hello"], "hello")
     must_log(sim, r"app hello: hello: run 1", start)
     t = since(sim)
-    keys(sim, b"a")  # input reached it: the user could leave it, so it may be resumed
+    keys(sim, b"a")  # input reached it: before 2026-11-02 that made it due for resuming
     must_log(sim, r"hello: key down 'a'", t)
     r = sim.wait(30, console=r"never", since=start)  # let it run past APP_RESUME_STARTED_MS (5 s)
     assert not r.get("ok")
     assert sim.prefs().get("app_resume") == "1", sim.prefs()
     t = since(sim)
     sim.api("POST", "/reset")
-    must_log(sim, r"Apps: resuming /apps/hello.elf", t, 120)
-    must_log(sim, r"app hello: hello: run 2", t)
-    t = since(sim)
-    long_press(sim)
-    must_log(sim, r"Apps: hello ended with 0", t)
+    must_log(sim, r"Apps: restart \(\d+\): home screen, no app resumed", t, 120)
     asleep(sim)
+    assert count_logs(sim, r"Apps: resuming") == 0
+    assert count_logs(sim, r"app hello: hello: run 2") == 0
     assert sim.prefs().get("app_resume") == "0"
 
 

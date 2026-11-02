@@ -7,7 +7,9 @@
 #include <ArduinoLog.h>
 #include <WiFi.h>
 #include <app_logger.h>
+#include <app_resume.h>
 #include <app_sleep_gate.h>
+#include <preferences_persistence.h>
 #include <bl.h>
 #include <board_config.h>
 #include <config.h>
@@ -56,6 +58,10 @@ void goToSleep(void) {
     return;
   }
   Log_info("Sleep: deep sleep, no app running");
+  {
+    PreferencesPersistence persistence(preferences);
+    app_resume_sleeping(persistence, app_sleep_gate_app()); // no app runs: nothing comes back on the wake
+  }
   Log.info("%s [%d]: go to sleep\r\n", __FILE__, __LINE__);
   submitStoredLogs();
 
