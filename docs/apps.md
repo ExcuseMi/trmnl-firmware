@@ -499,6 +499,7 @@ flash a file system image to a real X (it replaces those files); `test/sim/flash
 | see it | Apps > Storage on the X (used, free, each app with its .bak and saved files); the X's page: size per app and a storage line; event log at each boot that is not a wake: `apps: <name> <size> +bak <size> +data <size>, ...; <free> free` |
 | Free space | Apps > Storage > Free space, or the page's button (`POST /api/appfree`): removes the .bak copies and a stale upload temp file; apps and saved files stay |
 | serial | `TAPP DF`: `TAPP DF total <b> used <b> free <b>`. `TAPP LS`: `TAPP LS <size> <path>` for every file and folder (`/` at the end), then `TAPP LS END`. Read only; while the X is awake |
+| serial, more | `TAPP NVS` (read only): totals, `TAPP NVS key <namespace> <key> <type> <bytes>` each, `TAPP NVS ns <namespace> <entries>`, `TAPP NVS END`. `TAPP RUN <app> [arg]`: the running app is asked to exit, then this one starts (`TAPP RUN OK`). `TAPP RM <app> [data]` (`apps/upload.py <port> --remove <app> [--data]`): as Apps > Remove an app, the .elf and .bak, `data` also `/appdata/<app>`; refused for the running or resuming app and for anything not an app name (`TAPP RM OK` or `TAPP ERR rm ...`, an event log line) |
 
 Code: `lib/trmnl/src/app_space.cpp` (tests `test/test_app_space`), `src/app_storage_x.cpp`.
 

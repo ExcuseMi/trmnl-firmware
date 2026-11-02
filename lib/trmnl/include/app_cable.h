@@ -54,6 +54,10 @@ const char *app_cable_line_command(const app_cable_line_t *l);
 // "TAPP RUN <app>": the app's name (app_path_app_ok) into `name`; false for any other line or a bad name. The X asks
 // the running app to exit and starts this one (src/app_cable_x.cpp); "TAPP RUN OK <app>" or "TAPP ERR ..." answers
 bool app_cable_run_name(const char *line, char *name, size_t n);
+// "TAPP RM <app>" or "TAPP RM <app> data": the app's name (app_path_app_ok) into `name`, `*with_data` for the second
+// form (its /appdata files go too). False for any other line, a bad name (../, a path) or another word after it.
+bool app_cable_rm_parse(const char *line, char *name, size_t n, bool *with_data);
+
 // The start argument after the name ("TAPP RUN trmnl-print setup:trmnl-sketch"), "" when none; it ends at CR/LF
 const char *app_cable_run_arg(const char *line);
 

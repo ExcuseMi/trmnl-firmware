@@ -1,6 +1,7 @@
 """Copies apps to /apps on a TRMNL X over its USB serial port (docs/apps.md, "Copy an app to the X").
 
   python3 apps/upload.py <port> apps/build/hello.elf [more.elf ...]
+  python3 apps/upload.py <port> --remove <app> [--data]   (Apps > Remove an app: the .elf and .bak; --data: its files too)
 
 The X only has to be awake with the cable in: on a TRMNL screen, in a menu or with an app running, no menu needed
 (touch the bar first if it sleeps; this script keeps asking for 30 s). Not running: installed at once. The same app
@@ -128,11 +129,32 @@ def serial_port(path):
     return write, read_reply, flush_input
 
 
+def remove_line(app, data):
+    """The "TAPP RM" line for `app` (an app name, never a path: the X refuses those too)"""
+    if not app or "/" in app or app.startswith(".") or not all(c.isalnum() or c in "-_" for c in app):
+        raise UploadError("not an app name: %r" % app)
+    return b"TAPP RM %s%s\n" % (app.encode(), b" data" if data else b"")
+
+
+def remove(app, data, write, read_reply):
+    write(remove_line(app, data))
+    reply = read_reply(REPLY_S)
+    want = "TAPP RM OK %s%s" % (app, " data" if data else "")
+    if reply != want:
+        raise UploadError(reply or "no reply (wanted %r)" % want)
+
+
 def main(argv):
     if len(argv) < 3:
         sys.exit(__doc__)
     write, read_reply, flush_input = serial_port(argv[1])
     flush_input()
+    if argv[2] == "--remove":
+        if len(argv) < 4:
+            sys.exit(__doc__)
+        remove(argv[3], "--data" in argv[4:], write, read_reply)
+        print("removed %s%s" % (argv[3], " and its data" if "--data" in argv[4:] else ""))
+        return
     for path in argv[2:]:
         name = os.path.basename(path)
         upload(name, open(path, "rb").read(), write, read_reply)

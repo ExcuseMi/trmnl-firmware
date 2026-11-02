@@ -34,6 +34,9 @@ int menu_apps_open(const menu_controls_t &controls, const app_meta_t *metas, con
 
 // "Remove an app": the grid, a confirmation, the removal (app_remove.h; saved files only after a second
 // confirmation). Returns MENU_APPS_BACK when done or cancelled, MENU_APPS_TIMEOUT on a timeout.
+// The app running now, else the one due to resume, else "": it can not be removed
+void menu_apps_active(char *name, size_t len);
+
 int menu_apps_remove(const menu_controls_t &controls, menu_apps_choose_t choose, const app_meta_t *metas,
                      const char names[][32], int n);
 

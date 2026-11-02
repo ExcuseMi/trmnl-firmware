@@ -6,6 +6,7 @@
 #include <LittleFS.h>
 #include <app_path.h>
 #include <app_remove.h>
+#include <app_sleep_gate.h>
 #include <app_space.h>
 #include <app_resume.h>
 #include <globals.h>
@@ -197,9 +198,13 @@ int menu_apps_open(const menu_controls_t &controls, const app_meta_t *metas, con
   return order[pos];
 }
 
-// The app that is running or due to resume: it can not be removed
-static void active_app(char *name, size_t len) {
+// The app that is running or due to resume: it can not be removed (the menu and "TAPP RM")
+void menu_apps_active(char *name, size_t len) {
   name[0] = '\0';
+  if (const char *running = app_sleep_gate_app()) {
+    snprintf(name, len, "%s", running);
+    return;
+  }
   char path[APPS_PATH_MAX];
   snprintf(path, sizeof(path), "%s", preferences.getString(APP_RESUME_PATH_KEY, "").c_str());
   if (preferences.getBool(APP_RESUME_FLAG_KEY, false) && !app_path_name(path, name, len)) name[0] = '\0';
@@ -230,7 +235,7 @@ int menu_apps_remove(const menu_controls_t &controls, menu_apps_choose_t choose,
     if (c != 0) return MENU_APPS_BACK;
   }
   char active[32];
-  active_app(active, sizeof(active));
+  menu_apps_active(active, sizeof(active));
   const app_remove_t r = app_remove(webshare_fs_root(), APPS_DIR_REL, APPS_DATA_DIR_REL, file, active, with_files, true);
   Log_info("Apps: remove %s%s: %d", file, with_files ? " with its files" : "", (int)r);
   snprintf(line[0], sizeof(line[0]), r == APP_REMOVE_OK ? "Removed %s." : r == APP_REMOVE_ACTIVE

@@ -8,6 +8,7 @@
 #include <app_cable.h>
 #include <app_elf_check.h>
 #include <app_launch.h>
+#include <app_remove.h>
 #include <app_sleep_gate.h>
 #include <serial_hold.h>
 #include <apps.h>
@@ -22,6 +23,9 @@
 #include "app_host.h"
 #include "app_receive.h"
 #include "app_storage_x.h"
+#include "menu_apps.h"
+#include "webshare.h"
+#include <apps_config.h>
 #include "nvs_stats_x.h"
 #include "evlog.h"
 #include "usb_port_role.h"
@@ -180,9 +184,36 @@ bool app_cable_x_run_take(char *name, size_t n, char *arg, size_t arg_n) {
   return true;
 }
 
+static const char *rm_reason(app_remove_t r) {
+  switch (r) {
+  case APP_REMOVE_BAD_NAME: return "not an app name";
+  case APP_REMOVE_ACTIVE: return "it is running or due to resume (end it first)";
+  case APP_REMOVE_NOT_INSTALLED: return "not installed";
+  case APP_REMOVE_FAILED: return "a file could not be removed";
+  default: return "refused";
+  }
+}
+
+// "TAPP RM <app> [data]" (Apps > Remove an app over the cable): the .elf and .bak; "data" also its /appdata files
+static bool rm_command(const char *line) {
+  if (strncmp(line, "TAPP RM", 7) != 0) return false;
+  char name[32], active[32];
+  bool data = false;
+  if (!app_cable_rm_parse(line, name, sizeof(name), &data)) {
+    apps_reply("ERR rm: not an app name (TAPP RM <app> [data])");
+    return true;
+  }
+  menu_apps_active(active, sizeof(active));
+  app_remove_t r = app_remove(webshare_fs_root(), APPS_DIR_REL, APPS_DATA_DIR_REL, name, active, data, true);
+  evlog_add("Cable: remove %s%s: %s", name, data ? " with its data" : "", r == APP_REMOVE_OK ? "done" : rm_reason(r));
+  if (r == APP_REMOVE_OK) apps_reply("RM OK %s%s", name, data ? " data" : "");
+  else apps_reply("ERR rm %s: %s", name, rm_reason(r));
+  return true;
+}
+
 bool app_cable_x_command(const char *line) {
   return evlog_serial_command(line) || app_storage_serial_command(line) || nvs_stats_serial_command(line) ||
-         run_command(line);
+         run_command(line) || rm_command(line);
 }
 
 // Serial was begun by bootEarly before this task starts (test_serial_begin): a begin() here raced it on the other core

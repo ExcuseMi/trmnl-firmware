@@ -62,6 +62,21 @@ bool app_cable_run_name(const char *line, char *name, size_t n) {
   return app_path_app_ok(name);
 }
 
+bool app_cable_rm_parse(const char *line, char *name, size_t n, bool *with_data) {
+  if (!line || !name || !n || !with_data || strncmp(line, "TAPP RM ", 8) != 0) return false;
+  const char *a = line + 8;
+  size_t l = strcspn(a, " \r\n");
+  if (l == 0 || l >= n) return false;
+  memcpy(name, a, l);
+  name[l] = '\0';
+  const char *rest = a + l;
+  size_t tail = strcspn(rest, "\r\n");
+  if (tail == 0) *with_data = false;
+  else if (tail == 5 && !memcmp(rest, " data", 5)) *with_data = true;
+  else return false;
+  return app_path_app_ok(name);
+}
+
 const char *app_cable_run_arg(const char *line) {
   const char *sp = line ? strchr(line + (strncmp(line, "TAPP RUN ", 9) ? 0 : 9), ' ') : nullptr;
   return sp && line && !strncmp(line, "TAPP RUN ", 9) ? sp + 1 : "";

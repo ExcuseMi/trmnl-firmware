@@ -125,6 +125,23 @@ void test_run_names_an_app_or_is_refused() {
   TEST_ASSERT_FALSE(app_cable_run_name("TAPP RUN averyveryverylongappnamethatdoesnotfit", n, 8));
 }
 
+// "TAPP RM <app> [data]": only an app name, never a path (owner 2026-11-02)
+void test_rm_takes_an_app_name_only() {
+  char n[32];
+  bool data = true;
+  TEST_ASSERT_TRUE(app_cable_rm_parse("TAPP RM trmnl-print-old", n, sizeof(n), &data));
+  TEST_ASSERT_EQUAL_STRING("trmnl-print-old", n);
+  TEST_ASSERT_FALSE(data);
+  TEST_ASSERT_TRUE(app_cable_rm_parse("TAPP RM gameboy data\r", n, sizeof(n), &data));
+  TEST_ASSERT_TRUE(data);
+  TEST_ASSERT_FALSE(app_cable_rm_parse("TAPP RM ../config", n, sizeof(n), &data));
+  TEST_ASSERT_FALSE(app_cable_rm_parse("TAPP RM /apps/x.elf", n, sizeof(n), &data));
+  TEST_ASSERT_FALSE(app_cable_rm_parse("TAPP RM a/b", n, sizeof(n), &data));
+  TEST_ASSERT_FALSE(app_cable_rm_parse("TAPP RM ", n, sizeof(n), &data));
+  TEST_ASSERT_FALSE(app_cable_rm_parse("TAPP RM x everything", n, sizeof(n), &data));
+  TEST_ASSERT_FALSE(app_cable_rm_parse("TAPP RUN x", n, sizeof(n), &data));
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_commands_other_than_put_are_seen);
@@ -139,5 +156,6 @@ int main(int, char **) {
   RUN_TEST(test_header_while_an_update_waits_never_touches_its_file);
   RUN_TEST(test_header_with_nothing_waiting);
   RUN_TEST(test_run_names_an_app_or_is_refused);
+  RUN_TEST(test_rm_takes_an_app_name_only);
   return UNITY_END();
 }
