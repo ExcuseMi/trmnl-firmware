@@ -120,8 +120,12 @@ bool Modem::tcpOpen(const char *host, uint16_t port, bool tls, uint32_t timeoutM
   }
   _sink = sink;
   _sinkCtx = ctx;
-  snprintf(cmd, sizeof(cmd), "AT+CIPSTART=\"%s\",\"%s\",%u", tls ? "SSL" : "TCP", host, (unsigned)port);
-  uint32_t wait = (timeoutMs < 5000 && !quick) ? 5000 : timeoutMs;
+  uint32_t wait = nb_tcp_start(cmd, sizeof(cmd), host, port, tls, quick, timeoutMs);
+  if (!wait) {
+    _sink = nullptr;
+    _closed = true;
+    return false;
+  }
   for (int attempt = 0; attempt < (quick ? 1 : 2); attempt++) {
     _closed = false;
     sendCommand(cmd);

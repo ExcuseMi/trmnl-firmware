@@ -97,6 +97,32 @@ size_t nb_cipstart(char *out, size_t n, int link, const char *host, uint16_t por
   return w > 0 && (size_t)w < n ? (size_t)w : 0;
 }
 
+uint32_t nb_tcp_start(char *out, size_t n, const char *host, uint16_t port, bool tls, bool quick, uint32_t timeout_ms) {
+  if (!out || !n || !host) return 0;
+  if (quick) return !tls && nb_cipstart(out, n, -1, host, port, timeout_ms) ? timeout_ms + 2000 : 0; // its own end first
+  int w = snprintf(out, n, "AT+CIPSTART=\"%s\",\"%s\",%u", tls ? "SSL" : "TCP", host, (unsigned)port);
+  if (w <= 0 || (size_t)w >= n) return 0;
+  return timeout_ms < 5000 ? 5000 : timeout_ms;
+}
+
+bool nb_cfg_host_ip(const char *cfg, size_t n, uint32_t *ip) {
+  if (!cfg || !ip) return false;
+  for (size_t i = 0; i < n;) {
+    size_t e = i;
+    while (e < n && cfg[e] != '\n') e++;
+    if (e - i > 5 && e - i < 5 + 16 && !memcmp(cfg + i, "host=", 5)) {
+      char h[16];
+      size_t l = e - i - 5;
+      memcpy(h, cfg + i + 5, l);
+      h[l] = '\0';
+      if (l && h[l - 1] == '\r') h[l - 1] = '\0';
+      return nb_ip_parse(h, ip);
+    }
+    i = e + 1;
+  }
+  return false;
+}
+
 int nb_free_link(uint32_t used, int links) {
   for (int i = links - 1; i >= 0; i--)
     if (!(used & (1u << i))) return i;

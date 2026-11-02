@@ -8,9 +8,11 @@
 #include <modem.h>
 #include <string.h>
 #include <trmnl_log.h>
+#include <x_devset.h>
 
 #include "app_net_browse.h"
 #include "evlog.h"
+#include "x_devset_x.h"
 
 int app_net_browse_s3(const char *service, const char *proto, uint32_t timeout_ms, nb_list_t *out) {
   esp_err_t e = mdns_init(); // the Wi-Fi code starts one with the device's host name; ours only when none runs
@@ -56,41 +58,62 @@ static bool have_body(void *) {
   return b && reply_n >= b + 8 + 80; // the IPP header and the first attributes are in
 }
 
-// One connect at a time (ESP-AT's parser runs one AT+CIPSTART), each with its own short timeout (nb_probe_ms)
+// One address: a connect with its own short timeout, then Get-Printer-Attributes; a port 631 that speaks HTTP is a
+// print server, its model, else its address, names it
+static void probe(Modem *m, int link, uint32_t ip, uint32_t wait, nb_list_t *out) {
+  char host[16];
+  nb_ip_str(ip, host, sizeof(host));
+  reply_n = 0;
+  bool open = link >= 0 ? m->serverProbeOpen(link, host, 631, wait, on_reply, nullptr)
+                        : m->tcpOpen(host, 631, false, wait, on_reply, nullptr, true);
+  if (!open) return;
+  uint8_t q[256];
+  char head[256];
+  size_t ql = nb_ipp_query(q, sizeof(q), host, 631, "ipp/print");
+  size_t hl = ql ? nb_ipp_http_head(head, sizeof(head), host, 631, "ipp/print", ql) : 0;
+  char model[NB_NAME_MAX] = "";
+  bool sent = hl && (link >= 0 ? m->serverSend(link, (const uint8_t *)head, hl, 3000) && m->serverSend(link, q, ql, 3000)
+                               : m->tcpSend((const uint8_t *)head, hl, 3000) && m->tcpSend(q, ql, 3000));
+  if (sent) {
+    m->tcpPump(2000, have_body, nullptr);
+    size_t b = nb_http_body_at(reply, reply_n);
+    if (b) nb_ipp_model(reply + b, reply_n - b, model, sizeof(model));
+  }
+  bool http = reply_n >= 5 && memcmp(reply, "HTTP/", 5) == 0;
+  if (link >= 0) m->serverProbeClose();
+  else m->tcpClose();
+  if (model[0] || http) nb_list_add(out, model, host, 631, "ipp/print");
+}
+
+// The saved default printer's address first (it is found even when the walk runs out of time), then the /24 outward
+// from the X; one connect at a time (ESP-AT's parser runs one AT+CIPSTART), each with its own timeout (nb_probe_ms)
 static int walk(Modem *m, int link, uint32_t timeout_ms, nb_list_t *out) {
   uint32_t self = link >= 0 ? m->serverIp() : m->getIp();
   if (!self) return APP_ENONET;
-  uint32_t t0 = millis(), probed = 0, wait = nb_probe_ms(timeout_ms);
+  uint32_t t0 = millis(), probed = 0, wait = nb_probe_ms(timeout_ms), saved = 0, last = 0;
+  char cfg[XDS_VALUE_MAX + 1];
+  int cn = x_devset_get("printer", cfg, sizeof(cfg));
+  if (cn > 0 && nb_cfg_host_ip(cfg, (size_t)cn, &saved) && saved != self) {
+    probed++;
+    probe(m, link, saved, wait, out);
+  } else {
+    saved = 0;
+  }
   int step = 0;
   uint32_t ip;
   while (out->n < STOP_AFTER && millis() - t0 < timeout_ms && nb_walk_next(self, &step, &ip)) {
-    char host[16];
-    nb_ip_str(ip, host, sizeof(host));
+    if (ip == saved) continue;
     probed++;
-    reply_n = 0;
-    bool open = link >= 0 ? m->serverProbeOpen(link, host, 631, wait, on_reply, nullptr)
-                          : m->tcpOpen(host, 631, false, wait, on_reply, nullptr, true);
-    if (!open) continue;
-    uint8_t q[256];
-    char head[256];
-    size_t ql = nb_ipp_query(q, sizeof(q), host, 631, "ipp/print");
-    size_t hl = ql ? nb_ipp_http_head(head, sizeof(head), host, 631, "ipp/print", ql) : 0;
-    char model[NB_NAME_MAX] = "";
-    bool sent = hl && (link >= 0 ? m->serverSend(link, (const uint8_t *)head, hl, 3000) && m->serverSend(link, q, ql, 3000)
-                                 : m->tcpSend((const uint8_t *)head, hl, 3000) && m->tcpSend(q, ql, 3000));
-    if (sent) {
-      m->tcpPump(2000, have_body, nullptr);
-      size_t b = nb_http_body_at(reply, reply_n);
-      if (b) nb_ipp_model(reply + b, reply_n - b, model, sizeof(model));
-    }
-    bool http = reply_n >= 5 && memcmp(reply, "HTTP/", 5) == 0;
-    if (link >= 0) m->serverProbeClose();
-    else m->tcpClose();
-    // a port 631 that speaks HTTP is a print server; its model, else its address, names it
-    if (model[0] || http) nb_list_add(out, model, host, 631, "ipp/print");
+    last = ip;
+    probe(m, link, ip, wait, out);
   }
-  Log_event("Net: browse modem%s: %u addresses probed (%u ms each), %d found, %lu ms", link >= 0 ? " beside the page" : "",
-            (unsigned)probed, (unsigned)wait, out->n, (unsigned long)(millis() - t0));
+  char me[16], to[16], sv[16];
+  nb_ip_str(self, me, sizeof(me));
+  nb_ip_str(last, to, sizeof(to));
+  nb_ip_str(saved, sv, sizeof(sv));
+  Log_event("Net: browse modem%s: %u probed (%u ms each) from %s to %s, saved %s, %d found, %lu ms",
+            link >= 0 ? " beside the page" : "", (unsigned)probed, (unsigned)wait, me, to, saved ? sv : "none", out->n,
+            (unsigned long)(millis() - t0));
   return out->n;
 }
 

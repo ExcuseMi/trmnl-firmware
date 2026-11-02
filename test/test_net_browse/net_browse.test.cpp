@@ -201,6 +201,30 @@ void test_cipstart_carries_the_timeout_and_the_link() {
   TEST_ASSERT_EQUAL(0, nb_cipstart(b, 20, 1, "192.168.100.100", 631, 47)); // does not fit
 }
 
+// tcpOpen's quick probe: the connect timeout goes to the modem, the X waits a little longer than it (2026-11-02)
+void test_a_quick_probe_gives_the_modem_its_timeout() {
+  char b[96];
+  TEST_ASSERT_EQUAL(47 + 2000, nb_tcp_start(b, sizeof(b), "192.168.1.40", 631, false, true, 47));
+  TEST_ASSERT_EQUAL_STRING("AT+CIPSTART=\"TCP\",\"192.168.1.40\",631,,,47", b);
+  TEST_ASSERT_EQUAL(0, nb_tcp_start(b, sizeof(b), "printer.local", 631, false, true, 47)); // a probe is an address
+  TEST_ASSERT_EQUAL(5000, nb_tcp_start(b, sizeof(b), "example.com", 443, true, false, 3000)); // apps' HTTP as before
+  TEST_ASSERT_EQUAL_STRING("AT+CIPSTART=\"SSL\",\"example.com\",443", b);
+  TEST_ASSERT_EQUAL(0, nb_tcp_start(b, 20, "example.com", 443, true, false, 3000)); // does not fit
+}
+
+void test_the_saved_printer_host_is_read() {
+  uint32_t ip = 0;
+  const char *c = "name=Office\nhost=192.168.1.40\nport=631\npath=ipp/print\n";
+  TEST_ASSERT_TRUE(nb_cfg_host_ip(c, strlen(c), &ip));
+  TEST_ASSERT_EQUAL_HEX32(0xc0a80128, ip);
+  const char *d = "host=printer.local\n";
+  TEST_ASSERT_FALSE(nb_cfg_host_ip(d, strlen(d), &ip)); // a name: the walk cannot probe it
+  TEST_ASSERT_FALSE(nb_cfg_host_ip("", 0, &ip));
+  const char *e = "name=x\nhost=10.0.0.9";
+  TEST_ASSERT_TRUE(nb_cfg_host_ip(e, strlen(e), &ip)); // no newline at the end
+  TEST_ASSERT_EQUAL_HEX32(0x0a000009, ip);
+}
+
 void test_a_free_link_next_to_the_page() {
   TEST_ASSERT_EQUAL(4, nb_free_link(0, 5));
   TEST_ASSERT_EQUAL(3, nb_free_link(1u << 4, 5));
@@ -223,5 +247,7 @@ int main(int, char **) {
   RUN_TEST(test_the_probe_fits_the_budget);
   RUN_TEST(test_cipstart_carries_the_timeout_and_the_link);
   RUN_TEST(test_a_free_link_next_to_the_page);
+  RUN_TEST(test_a_quick_probe_gives_the_modem_its_timeout);
+  RUN_TEST(test_the_saved_printer_host_is_read);
   return UNITY_END();
 }

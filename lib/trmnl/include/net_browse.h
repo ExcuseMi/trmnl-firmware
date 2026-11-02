@@ -48,6 +48,13 @@ uint32_t nb_probe_ms(uint32_t budget_ms);
 // server (CIPMUX=1); keep-alive and local IP left at their defaults, timeout_ms the connect's own limit. Its length,
 // 0 when the host is not an IPv4 text or it does not fit
 size_t nb_cipstart(char *out, size_t n, int link, const char *host, uint16_t port, uint32_t timeout_ms);
+// The AT+CIPSTART of Modem::tcpOpen (CIPMUX=0). A quick probe carries its own connect timeout (nb_cipstart): without
+// it ESP-AT tried each address for its default 5 s and answered "busy" to the next commands (2026-11-02: 4 of 253
+// addresses in 15 s, the printer missed). Returns how long the X waits for the answer, 0 when it does not fit or a
+// quick probe's host is not an IPv4 text
+uint32_t nb_tcp_start(char *out, size_t n, const char *host, uint16_t port, bool tls, bool quick, uint32_t timeout_ms);
+// The IPv4 host of a "printer" device setting (key=value lines, host=...): the walk probes it first. false when none
+bool nb_cfg_host_ip(const char *cfg, size_t n, uint32_t *ip);
 // The link id for a probe while the page's server holds `used` (bit i: link i open): the highest free one below
 // `links`, -1 when every link is taken
 int nb_free_link(uint32_t used, int links);
