@@ -17,10 +17,18 @@ typedef enum {
                        // have had no way to leave it: a dead touch bar must not trap them in a resume loop)
 } app_resume_t;
 
+// How the X came up: only a wake from deep sleep resumes the app (owner 2026-11-02: "it just restarts back into the
+// sketch app, it shouldn't do that automatically"); a power-on, esptool or watchdog reset goes to the home screen
+typedef enum {
+  APP_RESET_SLEEP_WAKE, // ESP_RST_DEEPSLEEP
+  APP_RESET_RESTART,    // power-on, software, external or USB reset
+  APP_RESET_CRASH,      // panic or a watchdog
+} app_reset_t;
+
 // The app to resume, if one is due: copies its path to `path` (also for APP_RESUME_NO_INPUT, to name it) and clears
-// the flag (a crash before app_resume_started() then ends the resuming). `crashed`: the last reset was a panic or
-// watchdog; nothing is resumed and the flag is cleared.
-app_resume_t app_resume_take(Persistence &p, bool crashed, char *path, size_t path_len);
+// the flag (a crash before app_resume_started() then ends the resuming). Any `reset` but APP_RESET_SLEEP_WAKE: nothing
+// is resumed and the flag is cleared.
+app_resume_t app_resume_take(Persistence &p, app_reset_t reset, char *path, size_t path_len);
 
 // A touch or key reached the running app (written once per run)
 void app_resume_input(Persistence &p);

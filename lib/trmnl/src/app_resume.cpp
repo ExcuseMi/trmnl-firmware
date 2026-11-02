@@ -2,10 +2,10 @@
 
 #include <string.h>
 
-app_resume_t app_resume_take(Persistence &p, bool crashed, char *path, size_t path_len) {
+app_resume_t app_resume_take(Persistence &p, app_reset_t reset, char *path, size_t path_len) {
   if (!p.readBool(APP_RESUME_FLAG_KEY, false)) return APP_RESUME_NONE;
   p.writeBool(APP_RESUME_FLAG_KEY, false);
-  if (crashed) return APP_RESUME_NONE;
+  if (reset != APP_RESET_SLEEP_WAKE) return APP_RESUME_NONE;
   String last = p.readString(APP_RESUME_PATH_KEY, "");
   if (last.length() == 0 || last.length() >= path_len) return APP_RESUME_NONE;
   memcpy(path, last.c_str(), last.length() + 1);

@@ -125,7 +125,7 @@ void test_no_resume_after_a_timeout() {
   app_idle_begin(&t, 0, 5);
   if (app_idle_poll(&t, MIN(5)) == APP_IDLE_EXPIRED) app_idle_close(p); // what the runner does
   char path[64];
-  TEST_ASSERT_EQUAL(APP_RESUME_NONE, app_resume_take(p, false, path, sizeof(path)));
+  TEST_ASSERT_EQUAL(APP_RESUME_NONE, app_resume_take(p, APP_RESET_SLEEP_WAKE, path, sizeof(path)));
 }
 
 int main(int, char **) {

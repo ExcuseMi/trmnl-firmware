@@ -429,7 +429,8 @@ Code: `src/webshare_install.cpp` (routes, page in `webshare_install_page.h`), `l
 | long press on the touch bar | `APP_EVENT_EXIT`; after `APP_EXIT_GRACE_MS` (2 s) the device restarts into TRMNL |
 | TRMNL's sleep while an app runs | refused (`app_sleep_gate.h`, log `Sleep: refused, the app <name> is running`): the runner owns the device until the app exits |
 | TRMNL's sleep while Install via Wi-Fi or Receive over USB is on screen | refused (`app_sleep_gate_screen`, log `Sleep: refused, install screen`); the page is not switched off during an upload; Receive over USB waits 10 min |
-| app ran 5 s, then the device restarted | resumed (path in NVS `app_last`, flag `app_resume`) |
+| app ran 5 s, then the X woke from deep sleep | resumed (path in NVS `app_last`, flag `app_resume`) |
+| app ran 5 s, then a restart (power-on, esptool, watchdog or software reset) | not resumed: the home screen (owner 2026-11-02) |
 | app crashes while starting, or any panic or watchdog reset | not resumed: the flag is cleared before each start and set only after 5 s |
 | no touch or key reached the app before the restart (NVS `app_input`) | not resumed: "App stopped ... not resumed" on screen, then TRMNL (a dead touch bar must not trap the user) |
 | `TAPP NORESUME` + newline on the serial port (115200) while an app runs | resume cleared, restart into TRMNL |

@@ -614,9 +614,11 @@ void apps_resume_if_due(void) {
   bool crashed = reason == ESP_RST_PANIC || reason == ESP_RST_INT_WDT || reason == ESP_RST_TASK_WDT ||
                  reason == ESP_RST_WDT;
   char path[APPS_PATH_MAX];
-  app_resume_t due = app_resume_take(persistence, crashed, path, sizeof(path));
+  app_reset_t how = crashed ? APP_RESET_CRASH : reason == ESP_RST_DEEPSLEEP ? APP_RESET_SLEEP_WAKE : APP_RESET_RESTART;
+  app_resume_t due = app_resume_take(persistence, how, path, sizeof(path));
   if (due == APP_RESUME_NONE) {
     if (crashed) Log_event("Apps: reset by a crash (%d), no app resumed", reason);
+    else if (how == APP_RESET_RESTART) Log_info("Apps: restart (%d): home screen, no app resumed", reason);
     return;
   }
   if (due == APP_RESUME_NO_INPUT) {
