@@ -4,6 +4,7 @@
 #include <esp_system.h>
 #include <nvs.h>
 #include <nvs_flash.h>
+#include <nvs_clean.h>
 #include <nvs_write.h>
 #include <serial_out.h>
 #include <string.h>
@@ -41,7 +42,44 @@ static size_t value_size(const nvs_entry_info_t &e) {
   return n;
 }
 
+// "TAPP NVS CLEAN": the agreed list (nvs_clean.h), each item through the NVS API and in the event log
+static void clean(void) {
+  size_t n = 0;
+  const nvs_clean_item_t *l = nvs_clean_list(&n);
+  unsigned done = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (nvs_clean_protected(l[i].ns)) continue; // never, whatever the list says
+    nvs_handle_t h;
+    esp_err_t rc = nvs_open(l[i].ns, NVS_READWRITE, &h);
+    if (rc == ESP_ERR_NVS_NOT_FOUND) {
+      serial_out_printf("TAPP NVS CLEAN %s %s: not there\n", l[i].ns, l[i].key ? l[i].key : "*");
+      continue;
+    }
+    if (rc == ESP_OK) {
+      rc = l[i].key ? nvs_erase_key(h, l[i].key) : nvs_erase_all(h);
+      if (rc == ESP_ERR_NVS_NOT_FOUND) rc = ESP_OK; // already gone
+      if (rc == ESP_OK) rc = nvs_commit(h);
+      nvs_close(h);
+    }
+    evlog_add("NVS: clean %s/%s: %s", l[i].ns, l[i].key ? l[i].key : "*", rc == ESP_OK ? "removed" : esp_err_to_name(rc));
+    serial_out_printf("TAPP NVS CLEAN %s %s: %s\n", l[i].ns, l[i].key ? l[i].key : "*",
+                      rc == ESP_OK ? "removed" : esp_err_to_name(rc));
+    if (rc == ESP_OK) done++;
+  }
+  nvs_stats_t st;
+  if (nvs_get_stats(NULL, &st) == ESP_OK) {
+    evlog_add("NVS: after the clean %u used, %u free of %u entries", (unsigned)st.used_entries, (unsigned)st.free_entries,
+              (unsigned)st.total_entries);
+    serial_out_printf("TAPP NVS CLEAN END %u removed, used %u free %u\n", done, (unsigned)st.used_entries,
+                      (unsigned)st.free_entries);
+  }
+}
+
 bool nvs_stats_serial_command(const char *line) {
+  if (strcmp(line, "TAPP NVS CLEAN") == 0) {
+    clean();
+    return true;
+  }
   if (strcmp(line, "TAPP NVS") != 0) return false;
   nvs_stats_t st;
   if (nvs_get_stats(NULL, &st) == ESP_OK)
