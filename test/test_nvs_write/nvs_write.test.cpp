@@ -33,9 +33,24 @@ void test_a_write_that_wrote_nothing_is_reported_and_counted() {
   TEST_ASSERT_EQUAL_UINT(before + 2, nvs_write_failures());
 }
 
+// The X 2026-11-02, fw-nvs22: the report logged an error, the logger stored it in the full NVS, that write failed and
+// reported again: a restart loop. A report never reports from inside itself
+static int nested;
+static void report_that_writes(const char *, size_t, size_t) {
+  if (++nested > 5) return; // the test's own stop: without the guard this goes on
+  nvs_write_check("log_1", 0, 398, report_that_writes);
+}
+
+void test_a_report_that_fails_to_write_does_not_recurse() {
+  nested = 0;
+  TEST_ASSERT_FALSE(nvs_write_check("log_0", 0, 388, report_that_writes));
+  TEST_ASSERT_EQUAL(1, nested);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_a_write_that_took_is_quiet);
   RUN_TEST(test_a_write_that_wrote_nothing_is_reported_and_counted);
+  RUN_TEST(test_a_report_that_fails_to_write_does_not_recurse);
   return UNITY_END();
 }

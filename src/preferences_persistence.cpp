@@ -13,7 +13,8 @@
 
 // Every failed write in the log and the event log (nvs_write.h)
 static void report(const char *key, size_t got, size_t want) {
-  Log_error("NVS: write of %s failed (%u of %u bytes)", key, (unsigned)got, (unsigned)want);
+  // not Log_error: it stores the line in this same NVS (a restart loop on fw-nvs22, 2026-11-02)
+  Serial.printf("NVS: write of %s failed (%u of %u bytes)\n", key, (unsigned)got, (unsigned)want);
 #ifdef BOARD_TRMNL_X
   evlog_add("NVS: write of %s failed (%u of %u bytes)", key, (unsigned)got, (unsigned)want);
 #endif
