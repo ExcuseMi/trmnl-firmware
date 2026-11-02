@@ -157,6 +157,16 @@ void test_home_when_wifi_is_up_ap_when_not() {
   TEST_ASSERT_FALSE(ws_pick_mode((app_webshare_mode_t)9, true, &m));
 }
 
+// Every refusal has its own reason in the event log (2026-11-02: "could not start", nothing logged)
+void test_each_refusal_has_its_own_reason() {
+  const int rcs[] = {APP_EINVAL, APP_ENOENT, APP_ENOMEM, APP_ENONET, APP_EBUSY, -99};
+  for (size_t i = 0; i < sizeof(rcs) / sizeof(rcs[0]); i++) {
+    TEST_ASSERT_TRUE(ws_refusal_reason(rcs[i])[0]);
+    for (size_t j = 0; j < i; j++) TEST_ASSERT_TRUE(strcmp(ws_refusal_reason(rcs[i]), ws_refusal_reason(rcs[j])) != 0);
+  }
+  TEST_ASSERT_NOT_NULL(strstr(ws_refusal_reason(APP_ENOENT), "settings_declare"));
+}
+
 void test_stop_drops_only_the_wifi_the_page_joined() {
   TEST_ASSERT_TRUE(ws_release_wifi_on_stop(APP_WEBSHARE_HOME, false)); // joined for the page: freed for ESP-NOW
   TEST_ASSERT_FALSE(ws_release_wifi_on_stop(APP_WEBSHARE_HOME, true)); // the app's own net_up network stays
@@ -545,5 +555,6 @@ int main(int argc, char **argv) {
   RUN_TEST(test_zip_unreadable_file_is_an_error_not_a_short_zip);
   RUN_TEST(test_zip_refuses_too_many_or_long);
   RUN_TEST(test_stop_drops_only_the_wifi_the_page_joined);
+  RUN_TEST(test_each_refusal_has_its_own_reason);
   return UNITY_END();
 }

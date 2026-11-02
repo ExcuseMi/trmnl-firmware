@@ -579,13 +579,19 @@ static int touchbar_layout(int orientation, app_touchbar_t *out) {
 
 // ---- the radio's other users while ESP-NOW runs (espnow_rx.h radio_claim_check) ----
 
+static bool webshare_espnow_refuses(void) {
+  if (!radio_claim_check(espnow_app_radio_users(), RADIO_WANT_WEBSHARE)) return false;
+  evlog_add("webshare: not started: ESP-NOW holds the radio (espnow_stop first)");
+  return true;
+}
+
 static int app_webshare_start(app_webshare_mode_t mode) {
-  if (radio_claim_check(espnow_app_radio_users(), RADIO_WANT_WEBSHARE)) return APP_EBUSY;
+  if (webshare_espnow_refuses()) return APP_EBUSY;
   return webshare_start(mode);
 }
 
 static int app_webshare_start_files(app_webshare_mode_t mode, const app_webshare_files_t *files) {
-  if (radio_claim_check(espnow_app_radio_users(), RADIO_WANT_WEBSHARE)) return APP_EBUSY;
+  if (webshare_espnow_refuses()) return APP_EBUSY;
   return webshare_start_files(mode, files);
 }
 
@@ -608,9 +614,8 @@ static int keyboard_chars(int on) {
 static int pen_enable(int on) { return usb_pen_x_enable(on != 0); }
 
 static int app_webshare_start_settings(app_webshare_mode_t mode) {
-  if (!app_settings_x_declared()) return APP_ENOENT;
-  if (radio_claim_check(espnow_app_radio_users(), RADIO_WANT_WEBSHARE)) return APP_EBUSY;
-  return webshare_start_settings(mode);
+  if (webshare_espnow_refuses()) return APP_EBUSY;
+  return webshare_start_settings(mode); // APP_ENOENT (no form) logged there
 }
 
 static int touch_hold(uint32_t zones) {

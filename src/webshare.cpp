@@ -224,7 +224,7 @@ static int start_modem(void) {
   return 0;
 }
 
-int webshare_start_profile(app_webshare_mode_t requested, int profile) {
+static int start_profile(app_webshare_mode_t requested, int profile) {
   if (requested != APP_WEBSHARE_AUTO && requested != APP_WEBSHARE_AP && requested != APP_WEBSHARE_HOME) {
     return APP_EINVAL;
   }
@@ -303,6 +303,13 @@ int webshare_start_profile(app_webshare_mode_t requested, int profile) {
     Log_info("webshare: on, %s, %s", mode == APP_WEBSHARE_AP ? "access point" : modem ? "home network (modem, 5 GHz)" : "home network",
              S.address);
   }
+  return rc;
+}
+
+// Every refusal in the event log with its reason (2026-11-02: "could not start" and nothing logged)
+int webshare_start_profile(app_webshare_mode_t requested, int profile) {
+  int rc = start_profile(requested, profile);
+  if (rc) evlog_add("webshare: not started (profile %d): %s", profile, ws_refusal_reason(rc));
   return rc;
 }
 
