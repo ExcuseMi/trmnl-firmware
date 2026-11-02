@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include <app_upload.h>
 #include <usb_port.h>
@@ -28,6 +29,7 @@ const char *app_cable_refusal(usb_role_t role);
 typedef struct {
   char line[APP_UPLOAD_LINE_MAX];
   unsigned len;
+  bool ended; // the last feed ended a line
 } app_cable_line_t;
 
 void app_cable_line_init(app_cable_line_t *l);
@@ -35,9 +37,23 @@ void app_cable_line_init(app_cable_line_t *l);
 // One byte. True when it ended a line that holds "TAPP PUT ": *header is its "TAPP PUT ..." part (valid until the next feed)
 bool app_cable_line_feed(app_cable_line_t *l, unsigned char b, const char **header);
 
+// After a feed that returned false: the "TAPP ..." part of the line it ended when that is not a "TAPP PUT" (a command:
+// "TAPP EVLOG", "TAPP LS", "TAPP DF"), else nullptr. Valid until the next feed
+const char *app_cable_line_command(const app_cable_line_t *l);
+
 // Bytes of an upload may reach the app's key reader or the menu: while an upload is received nothing else reads the port
 void app_cable_busy_set(bool busy);
 bool app_cable_busy(void);
 
-// An upload under way holds back deep sleep this long at most (a host on the cable, a stuck transfer ends by its own idle timeout)
-#define APP_CABLE_SLEEP_HOLD_MS 60000
+// Deep sleep waits for the cable (goToSleep): while an upload is received (it ends by itself: APP_UPLOAD_IDLE_MS
+// without a byte), and APP_CABLE_QUIET_MS after the host's last byte (between two files, a header sent again, the
+// host's wake loop). Owner's X 2026-11-02: a 1 MB app over usbip took longer than the old 60 s hold and the X slept
+// mid-file; the next file's header came after the busy flag dropped and found it asleep. A host that never stops
+// sending is held APP_CABLE_HOLD_MAX_MS at most.
+#define APP_CABLE_QUIET_MS 15000u
+#define APP_CABLE_HOLD_MAX_MS (10u * 60u * 1000u)
+
+// A byte came from the host at `now_ms`
+void app_cable_rx_note(uint32_t now_ms);
+// Whether a sleep asked at `asked_ms` still waits at `now_ms` (pure over the busy flag and the last host byte)
+bool app_cable_sleep_hold(uint32_t asked_ms, uint32_t now_ms);

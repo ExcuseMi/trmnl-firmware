@@ -41,8 +41,10 @@
  * @return none
  */
 void goToSleep(void) {
-  // A cable upload under way (app_cable_x.cpp) finishes first, at most APP_CABLE_SLEEP_HOLD_MS
-  for (uint32_t t0 = millis(); app_cable_busy() && millis() - t0 < APP_CABLE_SLEEP_HOLD_MS;) delay(50);
+  // A cable upload under way, or a host still sending, first (app_cable.h: app_cable_sleep_hold)
+  const uint32_t asked = millis();
+  if (app_cable_sleep_hold(asked, asked)) Log_info("Sleep: waiting for the USB cable upload");
+  while (app_cable_sleep_hold(asked, millis())) delay(50);
   // An app owns the device until it exits (app_sleep_gate.h): no TRMNL sleep under it
   if (app_sleep_gate_ask("goToSleep") == APP_SLEEP_REFUSED) {
     if (app_sleep_gate_screen_name()) {

@@ -155,8 +155,8 @@ static bool pump_touch(void) {
 // nothing is resumed after the restart that follows) and the event log's "TAPP EVLOG ..."; others are ignored
 #define APP_CMD_NORESUME "TAPP NORESUME"
 static void serial_command(const char *line) {
-  const char *ev = strstr(line, "TAPP EVLOG"); // noise before it on the line ignored
-  if (ev && evlog_serial_command(ev)) return;
+  const char *ev = strstr(line, "TAPP "); // noise before it on the line ignored
+  if (ev && app_cable_x_command(ev)) return; // TAPP EVLOG, LS, DF
   size_t n = strlen(line), c_len = sizeof(APP_CMD_NORESUME) - 1;
   if (n < c_len || strcmp(line + n - c_len, APP_CMD_NORESUME) != 0) return;
   PreferencesPersistence persistence(preferences);
@@ -179,6 +179,7 @@ static void pump_keys(void) {
     if (app_cable_busy()) return; // an upload is being received (app_cable_x.cpp): not keys
     int b = Serial.read();
     if (b < 0) break;
+    app_cable_rx_note(millis()); // a host on the cable: the sleep after the app waits for it
     const char *put;
     if (app_cable_line_feed(&cable_in, (uint8_t)b, &put)) {
       app_cable_x_header(put); // receives the whole file; the app keeps running meanwhile

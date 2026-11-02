@@ -18,6 +18,7 @@
 #include <trmnl_log.h>
 
 #include "app_receive.h"
+#include "app_storage_x.h"
 #include "evlog.h"
 #include "usb_port_role.h"
 
@@ -60,9 +61,8 @@ static void upload(const char *header) {
   app_cable_busy_set(true);
   char reason[112] = "";
   app_upload_header_t h;
-  uint64_t total = LittleFS.totalBytes(), used = LittleFS.usedBytes();
-  app_upload_result_t r = app_upload_parse(header, used < total ? total - used : 0, &h);
-  if (r == APP_UPLOAD_BAD_HEADER) app_upload_got_text(header, 32, reason, sizeof(reason));
+  app_upload_result_t r = pending ? app_upload_parse(header, UINT64_MAX, &h) // the waiting file is not stale
+                                  : apps_parse_header(header, &h, reason, sizeof(reason));
   usb_role_t role = usb_port_role();
   if (r == APP_UPLOAD_OK && pending) {
     apps_reply("ERR busy: an update waits for its app to exit");
@@ -143,6 +143,8 @@ bool app_cable_x_finish(char *path, unsigned len) {
   return true;
 }
 
+bool app_cable_x_command(const char *line) { return evlog_serial_command(line) || app_storage_serial_command(line); }
+
 static void cable_task(void *) {
   Serial.begin(115200);
   app_cable_line_t line;
@@ -156,7 +158,9 @@ static void cable_task(void *) {
     }
     while (Serial.available() > 0) {
       const char *header;
+      app_cable_rx_note(millis()); // a host on the cable: no deep sleep under it (app_cable_sleep_hold)
       if (app_cable_line_feed(&line, (unsigned char)Serial.read(), &header)) upload(header);
+      else if (const char *cmd = app_cable_line_command(&line)) app_cable_x_command(cmd);
     }
   }
 }
