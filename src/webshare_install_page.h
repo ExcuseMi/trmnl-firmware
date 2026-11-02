@@ -35,7 +35,7 @@ canvas{width:40px;height:40px;border:1px solid var(--line);border-radius:.35rem;
 <nav><button data-t=apps class=on>Apps</button><button data-t=devs>Devices</button><button data-t=me>This X</button></nav>
 <div id=msg hidden></div>
 <div id=t-apps>
-<section><h2>Apps</h2><div id=apps></div></section>
+<section><h2>Apps</h2><div id=apps></div><p id=space class=s></p><button id=free>Free space</button></section>
 <section id=cfg hidden><h2 id=cfgname></h2><div class=f><label>Close this app after</label><select id=cfgidle></select></div>
 <form id=cfgform></form><button id=cfgsave>Save</button>
 <p class=s>The app reads the new values when it starts next (or at once if it runs).</p></section>
@@ -70,7 +70,7 @@ async function api(path,opt){
   catch(e){return{ok:false,status:0,j:{error:'no connection (the X switched the page off?)'}}}}
 const post=(p,b)=>api(p,{method:'POST',body:b||'',headers:Object.assign({},F,H)});
 const enc=o=>Object.keys(o).map(k=>k+'='+encodeURIComponent(o[k])).join('&');
-function kb(n){return n<1024?n+' B':(n/1024).toFixed(1)+' KB'}
+function kb(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB'}
 function icon(c,hex){const g=c.getContext('2d');c.width=c.height=64;g.fillStyle='#fff';g.fillRect(0,0,64,64);g.fillStyle='#000';
   for(let i=0;i<hex.length/2;i++){const b=parseInt(hex.substr(i*2,2),16);for(let k=0;k<8;k++)if(!(b&(128>>k)))g.fillRect((i%8)*8+k,i>>3,1,1)}}
 function letter(c,t){const g=c.getContext('2d');c.width=c.height=64;g.fillStyle='#000';g.font='bold 40px sans-serif';g.textAlign='center';g.fillText(t,32,46)}
@@ -84,7 +84,7 @@ async function load(){
   for(const a of r.j.apps){
     const id=a.n.replace(/\.elf$/,''),d=el('div',null,'row'),c=el('canvas');d.appendChild(c);letter(c,id[0].toUpperCase());
     const n=el('span',id+(a.bak?' (older version kept)':''),'n');d.appendChild(n);
-    d.appendChild(el('span',kb(a.s),'s'));
+    d.appendChild(el('span',kb(a.s+(a.bs||0))+(a.data?' + '+kb(a.data)+' saved':''),'s'));
     const cf=el('button','Configure');cf.onclick=()=>configure(id,n.textContent);d.appendChild(cf);
     const x=el('button','Remove');x.onclick=async()=>{
       if(!confirm('Remove '+n.textContent+' from the X?'))return;
@@ -92,7 +92,9 @@ async function load(){
       say(res.ok?'Removed.':(res.j.error||'Failed'),!res.ok);load()};d.appendChild(x);box.appendChild(d);
     api('/api/appinfo?app='+encodeURIComponent(id)).then(i=>{if(!i.ok)return;n.textContent=i.j.name;
       if(i.j.icon)icon(c,i.j.icon);else letter(c,(i.j.name[0]||'?').toUpperCase())})}
-  if(!r.j.apps.length)box.textContent='No apps yet.';go()}
+  if(!r.j.apps.length)box.textContent='No apps yet.';
+  if(r.j.fs)$('space').textContent='Storage: '+kb(r.j.fs.used)+' used, '+kb(r.j.fs.free)+' free. Free space removes old copies of apps and leftovers.';go()}
+$('free').onclick=async()=>{const r=await post('/api/appfree');say(r.ok?'Freed '+kb(r.j.freed)+'.':(r.j.error||'Failed'),!r.ok);load()};
 // The section an app asked for (device_page_open: #configure=<app>, #devices, #this-x, #apps), once
 function go(){const h=decodeURIComponent(location.hash.slice(1));if(!h)return;history.replaceState(null,'',location.pathname);
   if(h.startsWith('configure='))configure(h.slice(10),h.slice(10));else if(h=='devices')tab('devs');else if(h=='this-x')tab('me')}

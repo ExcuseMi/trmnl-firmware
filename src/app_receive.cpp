@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <app_install.h>
+#include <app_space.h>
 #include <app_upload.h>
 #include <esp_heap_caps.h>
 #include <trmnl_crc32.h>
@@ -16,6 +17,7 @@
 #include <string.h>
 
 #include "app_receive.h"
+#include "evlog.h"
 #include "webshare.h" // webshare_fs_root
 
 #define RECEIVE_IDLE_MS (10u * 60u * 1000u) // no upload started for this long: back to the menu
@@ -56,6 +58,20 @@ static bool read_line(char *line, size_t cap, uint32_t idle_ms, bool (*cancel)(v
     }
     line[len++] = (char)b;
   }
+}
+
+app_upload_result_t apps_parse_header(const char *header, app_upload_header_t *h, char *reason, size_t reason_len) {
+  reason[0] = '\0';
+  app_upload_result_t r = app_upload_parse(header, UINT64_MAX, h); // the size first, the room for it next
+  if (r == APP_UPLOAD_BAD_HEADER) app_upload_got_text(header, 32, reason, reason_len); // what it got
+  if (r != APP_UPLOAD_OK) return r;
+  const uint32_t size = h->size;
+  int dropped = 0;
+  uint64_t free_bytes = app_space_make_room(webshare_fs_root(), size, &dropped);
+  if (dropped) Log_event("Apps: %d .bak copies removed to make room for %s", dropped, h->path);
+  r = app_upload_parse(header, free_bytes, h);
+  if (r == APP_UPLOAD_NO_SPACE) app_space_no_room_text(free_bytes, size, reason, reason_len);
+  return r;
 }
 
 // The complete upload in APP_UPLOAD_TMP becomes the app the same way as an Install via Wi-Fi: app_install_commit
@@ -137,10 +153,8 @@ int apps_receive(bool (*cancel)(void)) {
     }
     if (header != line) Log_info("Apps: %u bytes before \"TAPP \" dropped: %s", (unsigned)(header - line), got);
     app_upload_header_t h;
-    uint64_t total = LittleFS.totalBytes(), used = LittleFS.usedBytes();
-    app_upload_result_t r = app_upload_parse(header, used < total ? total - used : 0, &h);
     char reason[112] = "";
-    if (r == APP_UPLOAD_BAD_HEADER) app_upload_got_text(header, 32, reason, sizeof(reason)); // what it got
+    app_upload_result_t r = apps_parse_header(header, &h, reason, sizeof(reason));
     if (r == APP_UPLOAD_OK) r = receive_data(h, reason, sizeof(reason));
     if (r != APP_UPLOAD_OK) {
       Log_info("Apps: upload refused: %s%s%s", app_upload_result_str(r), reason[0] ? ": " : "", reason);

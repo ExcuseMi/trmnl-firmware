@@ -6,6 +6,7 @@
 #include <LittleFS.h>
 #include <app_path.h>
 #include <app_remove.h>
+#include <app_space.h>
 #include <app_resume.h>
 #include <globals.h>
 #include <touchbar_layout.h>
@@ -18,6 +19,7 @@
 
 #include "fonts.h"
 #include "webshare.h"
+#include "app_storage_x.h"
 
 #define TILE_BORDER     3
 #define TILE_SELECTED   10 // total border of the selected tile
@@ -236,6 +238,39 @@ int menu_apps_remove(const menu_controls_t &controls, menu_apps_choose_t choose,
   const char *ok[1] = {"Back"};
   choose(ok, 1, body, 1, 0);
   return MENU_APPS_BACK;
+}
+
+// "Storage": the used and free bytes, each app with its .bak copy and saved files, and "Free space" (app_space.h)
+int menu_apps_storage(menu_apps_choose_t choose) {
+  static app_space_app_t apps[APPS_MAX];
+  static char lines[APPS_MAX + 2][96];
+  const char *body[APPS_MAX + 2];
+  while (true) {
+    int n = app_space_apps(webshare_fs_root(), apps, APPS_MAX), shown = 0;
+    app_storage_line(lines[shown], sizeof(lines[0]));
+    body[shown] = lines[shown];
+    shown++;
+    uint64_t baks = 0;
+    for (int i = 0; i < n && shown < 12; i++) {
+      char e[16], d[16];
+      app_space_size_text(apps[i].elf + apps[i].bak, e, sizeof(e));
+      app_space_size_text(apps[i].data, d, sizeof(d));
+      snprintf(lines[shown], sizeof(lines[0]), "%s\t%s app, %s saved", apps[i].name, e, d);
+      body[shown] = lines[shown];
+      shown++;
+      baks += apps[i].bak;
+    }
+    char b[16];
+    app_space_size_text(baks, b, sizeof(b));
+    snprintf(lines[shown], sizeof(lines[0]), "Free space removes old copies of apps (%s) and leftovers.", b);
+    body[shown] = lines[shown];
+    shown++;
+    const char *labels[2] = {"Free space", "Back"};
+    int c = choose(labels, 2, body, shown, 1);
+    if (c < 0) return MENU_APPS_TIMEOUT;
+    if (c != 0) return MENU_APPS_BACK;
+    app_storage_free_space(); // the screen again, with the new numbers
+  }
 }
 
 #endif // BOARD_TRMNL_X

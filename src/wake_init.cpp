@@ -26,6 +26,7 @@
 #include <apps.h>
 #include "serial_watch_hw.h"
 #include "usb_port_role.h"
+#include "app_storage_x.h"
 
 #include "touchbar_actions.h"
 #else
@@ -156,6 +157,7 @@ void startBoardHardware(const WakeContext &wake, uint32_t init_time) {
   iqs323_task_i2c_unlock();
   filesystem_init();
   evlog_begin(); // the event log of the last boots, before an app is resumed
+  app_storage_boot_log(); // the apps and their sizes, once per boot
 
   Wire.setClock(100000);
 

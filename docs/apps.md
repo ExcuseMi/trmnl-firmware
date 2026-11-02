@@ -53,7 +53,7 @@ Recent device events kept on the X across restarts and deep sleep (`src/evlog.cp
 | line | `#<boot> <uptime s> <UTC time or -> <text>`; the same text again in a row: ` (xN)` |
 | writes | only on events, at most every `event_log.flush_gap_ms`; at once before the firmware's own restarts and sleep. The newest 6 events not yet written are also kept in RTC memory (`src/evlog_crash.cpp`) and put in after a restart. A damaged file: empty log, "the saved log was damaged" |
 | crash | panic or watchdog reset: `crash: <reason> at app+0x<offset> [backtrace...], app <name> entry 0x<entry>` in the crashed boot, after its events (RTC memory, written by the Arduino core's panic hook). `app+0x<offset>`: `xtensa-esp32s3-elf-addr2line -e <app>.elf` at the ELF's `e_entry` + offset (`tools/app_addr2line.py`); outside the app the raw address. No panic record (watchdog reset, brownout): said so |
-| read | `TAPP EVLOG` + newline on the serial port while an app runs: `TAPP EVLOG <line>` each, oldest first, then `TAPP EVLOG END`. `TAPP EVLOG CLEAR`: `TAPP EVLOG CLEARED`. An app: `event_log_lines` |
+| read | `TAPP EVLOG` + newline on the serial port while the X is awake (an app, a menu, a TRMNL screen): `TAPP EVLOG <line>` each, oldest first, then `TAPP EVLOG END`. `TAPP EVLOG CLEAR`: `TAPP EVLOG CLEARED`. An app: `event_log_lines` |
 
 ## Keyboards
 
@@ -490,6 +490,17 @@ flash a file system image to a real X (it replaces those files); `test/sim/flash
 | end | `TAPP OK <name>.elf`, or `TAPP ERR short` (no byte for 5 s) / `bad crc` / `write failed`: the old app stays |
 | writes | `/apps/.upload.tmp`; after size and CRC match, `app_install_commit` (the one install path, shared with Install via Wi-Fi): the loader's ELF check (`TAPP ERR refused: <reason>`), the old app kept as `.bak` until the new one started, then the rename. A leftover temp file is removed at the next start |
 
+## Storage
+
+| | |
+|---|---|
+| room for an upload | the free bytes plus a stale `apps/.upload.tmp`, less `apps.upload_margin_bytes`; short: every `apps/*.elf.bak` is removed first (event log `Apps: N .bak copies removed`). The app being replaced stays until its new file is complete, so it needs its own room. Still short: `TAPP ERR no space: <free> free, <needed> needed` |
+| see it | Apps > Storage on the X (used, free, each app with its .bak and saved files); the X's page: size per app and a storage line; event log at each boot that is not a wake: `apps: <name> <size> +bak <size> +data <size>, ...; <free> free` |
+| Free space | Apps > Storage > Free space, or the page's button (`POST /api/appfree`): removes the .bak copies and a stale upload temp file; apps and saved files stay |
+| serial | `TAPP DF`: `TAPP DF total <b> used <b> free <b>`. `TAPP LS`: `TAPP LS <size> <path>` for every file and folder (`/` at the end), then `TAPP LS END`. Read only; while the X is awake |
+
+Code: `lib/trmnl/src/app_space.cpp` (tests `test/test_app_space`), `src/app_storage_x.cpp`.
+
 ## Update over the cable
 
 No menu: `python3 apps/upload.py /dev/ttyACM0 apps/build/hello.elf [more.elf]` (same command, same protocol) works whenever the X is awake with the cable in: a TRMNL screen, any firmware menu, or an app running. Asleep: touch the bar; upload.py asks again for 30 s. The port is opened quietly (DTR/RTS low, no reset).
@@ -502,7 +513,7 @@ No menu: `python3 apps/upload.py /dev/ttyACM0 apps/build/hello.elf [more.elf]` (
 | USB host mode (keyboard, pen) or the USB drive has the port | `TAPP ERR busy: ...`; nothing written. esptool/flashing is the ROM loader: the firmware does not run then |
 | bad ELF, bad CRC, short, no space | `TAPP ERR ...` after the data; the temp file goes, the old app is untouched. The ELF is checked (`app_elf_check`) before the running app is asked to exit |
 
-Deep sleep waits for an upload under way (60 s at most; a stuck transfer ends after 5 s without a byte). While an app runs the supervise loop receives the file (a long press is handled after it, seconds). Code: `lib/trmnl/src/app_cable.cpp` (decisions, tests `test/test_app_cable`), `src/app_cable_x.cpp`; upload.py retry test `python3 test/upload_py/test_upload_retry.py`. Event log lines start with `Cable:`.
+Deep sleep waits for an upload under way (a stuck transfer ends after 5 s without a byte) and for 15 s after the host's last byte (between files, a header sent again), 10 min at most (`app_cable_sleep_hold`). While an app runs the supervise loop receives the file (a long press is handled after it, seconds). Code: `lib/trmnl/src/app_cable.cpp` (decisions, tests `test/test_app_cable`), `src/app_cable_x.cpp`; upload.py retry test `python3 test/upload_py/test_upload_retry.py`. Event log lines start with `Cable:`.
 
 ## Crash in an app
 

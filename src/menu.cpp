@@ -576,8 +576,8 @@ static menu_outcome_t run_menu_screens(SPECIAL_FUNCTION *function) {
     }
     case MENU_SCREEN_APPS: {
       static app_meta_t metas[APPS_MAX];
-      const char *labels[6] = {"Open an app", "Receive over USB", "Install via Wi-Fi", "Remove an app"};
-      int n = 4, forget_item = -1;
+      const char *labels[7] = {"Open an app", "Receive over USB", "Install via Wi-Fi", "Remove an app", "Storage"};
+      int n = 5, forget_item = -1;
       ble_pair_peer_t bond;
       static char forget[48];
       if (ble_keyboard_bond(&bond)) { // only while a Bluetooth keyboard is paired
@@ -596,6 +596,11 @@ static menu_outcome_t run_menu_screens(SPECIAL_FUNCTION *function) {
       if (item == 1) {
         receive_apps();
         break; // the Apps submenu again, with what came
+      }
+      if (item == 4) {
+        if (menu_apps_storage(apps_choose) == MENU_APPS_TIMEOUT) return MENU_OUTCOME_CLOSE;
+        app_count = apps_list(app_names, app_paths, APPS_MAX);
+        break;
       }
       if (item == forget_item) {
         ble_keyboard_forget(); // the next app that wants it shows the pairing screen

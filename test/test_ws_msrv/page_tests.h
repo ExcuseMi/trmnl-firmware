@@ -138,6 +138,21 @@ static void test_apps_profile_raw_and_multipart() {
   TEST_ASSERT_FALSE(ROOT_FS->has("apps/bad.elf"));
   TEST_ASSERT_EQUAL(200, status(post("/api/appdelete?name=hey.elf", "", c, "")));
   TEST_ASSERT_FALSE(ROOT_FS->has("apps/hey.elf"));
+  // Storage (owner's X 2026-11-02: no room, nothing showed what held it): sizes per app, Free space drops .bak copies
+  ROOT_FS->put("apps/hello.elf.bak", std::string(3000, 'b'));
+  ROOT_FS->nodes["appdata"] = MemFs::Node{true, ""};
+  ROOT_FS->nodes["appdata/hello"] = MemFs::Node{true, ""};
+  ROOT_FS->put("appdata/hello/save.bin", std::string(700, 's'));
+  r = get("/api/apps", c);
+  TEST_ASSERT_TRUE_MESSAGE(body(r).find("\"bs\":3000,\"data\":700") != std::string::npos, body(r).c_str());
+  TEST_ASSERT_TRUE(body(r).find("\"fs\":{\"used\":") != std::string::npos);
+  TEST_ASSERT_EQUAL(401, status(post("/api/appfree", "", "", "")));
+  r = post("/api/appfree", "", c, "");
+  TEST_ASSERT_EQUAL(200, status(r));
+  TEST_ASSERT_TRUE_MESSAGE(body(r).find("\"freed\":3000") != std::string::npos, body(r).c_str());
+  TEST_ASSERT_FALSE(ROOT_FS->has("apps/hello.elf.bak"));
+  TEST_ASSERT_TRUE(ROOT_FS->has("apps/hello.elf"));
+  TEST_ASSERT_TRUE(ROOT_FS->has("appdata/hello/save.bin"));
 }
 
 static void test_settings_profile_form() {

@@ -37,5 +37,9 @@ int menu_apps_open(const menu_controls_t &controls, const app_meta_t *metas, con
 int menu_apps_remove(const menu_controls_t &controls, menu_apps_choose_t choose, const app_meta_t *metas,
                      const char names[][32], int n);
 
+// "Storage": used and free bytes, the apps with their sizes (with .bak and saved files), a "Free space" action that
+// removes .bak copies and a stale upload temp file. MENU_APPS_BACK or MENU_APPS_TIMEOUT.
+int menu_apps_storage(menu_apps_choose_t choose);
+
 #endif
 #endif
