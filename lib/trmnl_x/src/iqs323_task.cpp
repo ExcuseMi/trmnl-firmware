@@ -2,6 +2,7 @@
 #include "iqs323_task.h"
 #include "IQS323.h"
 #include "rtc_wake_stub_trmnl_x.h"
+#include <touchbar_settle.h>
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -60,6 +61,8 @@ static touchbar_snapshot_t g_wake_stub_snapshot = {
 static bool g_wake_stub_snapshot_valid = false;
 // Channels (bit n: channel n) whose touch started since iqs323_task_take_touch_starts(), under iqs323_mutex
 static uint8_t g_touch_starts = 0;
+// After a full init no touch passes until the bar settled (touchbar_settle.h), under iqs323_mutex
+static touchbar_settle_t g_settle = {};
 
 // Sole accessor of the IQS323 object; other files use the snapshot/request API below.
 IQS323 iqs323;
@@ -302,13 +305,29 @@ void iqs323_task_set_data_callback(iqs323_data_callback_t callback)
     data_callback = callback;
 }
 
+// One line per settle step after a full init: the counts and baselines show how far the bar drifted
+static void iqs323_log_settle(const char *what, uint8_t raw)
+{
+    Serial.printf("IQS323 Task: touch %s at %lu ms after init, touched=%u counts/lta %u/%u %u/%u %u/%u\n", what,
+        (unsigned long)(millis() - g_settle.since_ms), raw,
+        iqs323.readChannelCounts(IQS323_CH0), iqs323.readChannelLTA(IQS323_CH0),
+        iqs323.readChannelCounts(IQS323_CH1), iqs323.readChannelLTA(IQS323_CH1),
+        iqs323.readChannelCounts(IQS323_CH2), iqs323.readChannelLTA(IQS323_CH2));
+}
+
 // Decodes current IQS323 state into g_touchbar_snapshot. Caller must hold iqs323_mutex.
 static void iqs323_publish_snapshot(void)
 {
     const touchbar_snapshot_t before = g_touchbar_snapshot;
-    g_touchbar_snapshot.ch0_touch = iqs323.channel_touchState(IQS323_CH0);
-    g_touchbar_snapshot.ch1_touch = iqs323.channel_touchState(IQS323_CH1);
-    g_touchbar_snapshot.ch2_touch = iqs323.channel_touchState(IQS323_CH2);
+    const uint8_t raw = (iqs323.channel_touchState(IQS323_CH0) ? 1 : 0) | (iqs323.channel_touchState(IQS323_CH1) ? 2 : 0) |
+                        (iqs323.channel_touchState(IQS323_CH2) ? 4 : 0);
+    const bool ati_active = (iqs323.IQSMemoryMap.SYSTEM_STATUS[0] >> IQS323_ATI_ACTIVE_BIT) & 1;
+    const bool settling = g_settle.active;
+    const uint8_t seen = touchbar_settle_filter(&g_settle, millis(), raw, ati_active);
+    if (settling && !g_settle.active) iqs323_log_settle("settled", raw);
+    g_touchbar_snapshot.ch0_touch = seen & 1;
+    g_touchbar_snapshot.ch1_touch = seen & 2;
+    g_touchbar_snapshot.ch2_touch = seen & 4;
     if (g_touchbar_snapshot.ch0_touch && !before.ch0_touch) g_touch_starts |= 1 << 0;
     if (g_touchbar_snapshot.ch1_touch && !before.ch1_touch) g_touch_starts |= 1 << 1;
     if (g_touchbar_snapshot.ch2_touch && !before.ch2_touch) g_touch_starts |= 1 << 2;
@@ -502,6 +521,13 @@ static void iqs323_task_main(void *pvParameters)
         // The library's run() only does I2C when RDY flag is set (from library's ISR)
         if (current_state == IQS323_TASK_STATE_RUNNING && !i2c_locked) {
             if (xSemaphoreTake(iqs323_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                const bool settling = g_settle.active;
+                touchbar_settle_tick(&g_settle, millis());
+                if (settling && !g_settle.active) iqs323_log_settle("settled (limit)", g_settle.last);
+                if (touchbar_settle_take_reati(&g_settle)) {
+                    iqs323_log_settle("re-ATI", g_settle.last);
+                    iqs323.ReATI(STOP);
+                }
                 // Run IQS323 state machine - only does I2C if iqs323_deviceRDY is true
                 iqs323.run();
 
@@ -650,6 +676,10 @@ static bool iqs323_do_init(bool use_wake_stub)
 
         if (!success && (millis() - start_time) >= timeout) {
             Serial.println("IQS323 Task: Initialization timeout");
+        }
+        if (success) {
+            touchbar_settle_begin(&g_settle, millis()); // the ATI just ran amid the boot work
+            iqs323_log_settle("settling", 0);
         }
     }
 
