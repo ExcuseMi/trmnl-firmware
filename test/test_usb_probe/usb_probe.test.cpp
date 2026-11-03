@@ -108,6 +108,29 @@ void test_hub_ports_from_a_whole_hub_descriptor_only() {
   TEST_ASSERT_EQUAL(-1, usb_probe_hub_ports(nullptr, 9));
 }
 
+// Owner's X 2026-11-03: four reconnects of the XP-Pen in a few minutes, each with its descriptors and first reports
+void test_a_reconnect_dumps_nothing_again() {
+  usb_probe_once_t t = {};
+  TEST_ASSERT_TRUE(usb_probe_once(&t, 0x28bd, 0x0905, 1));
+  TEST_ASSERT_TRUE(usb_probe_once(&t, 0x28bd, 0x0905, 2)); // its other interface
+  TEST_ASSERT_EQUAL_UINT32(USB_PROBE_PEN_REPORTS, usb_probe_first_reports(true, true));
+  TEST_ASSERT_EQUAL_UINT32(USB_PROBE_FULL_REPORTS, usb_probe_first_reports(true, false));
+  for (int k = 0; k < 3; k++) { // reconnects
+    TEST_ASSERT_FALSE(usb_probe_once(&t, 0x28bd, 0x0905, 1));
+    TEST_ASSERT_FALSE(usb_probe_once(&t, 0x28bd, 0x0905, 2));
+  }
+  TEST_ASSERT_EQUAL_UINT32(0, usb_probe_first_reports(false, true));
+  TEST_ASSERT_TRUE(usb_probe_once(&t, 0x046d, 0xc52b, 1)); // another device: dumped
+}
+
+void test_a_full_table_still_dumps_new_devices() {
+  usb_probe_once_t t = {};
+  for (int i = 0; i < USB_PROBE_ONCE_MAX; i++) TEST_ASSERT_TRUE(usb_probe_once(&t, 0x1000, (uint16_t)i, 0));
+  TEST_ASSERT_TRUE(usb_probe_once(&t, 0x2000, 1, 0)); // not remembered: dumped each time
+  TEST_ASSERT_TRUE(usb_probe_once(&t, 0x2000, 1, 0));
+  TEST_ASSERT_FALSE(usb_probe_once(&t, 0x1000, 3, 0)); // the remembered ones still are
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_report_upto_logs_the_first_ones_counts_all);
@@ -118,5 +141,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_counter_does_not_wrap);
   RUN_TEST(test_max_power_in_milliamps);
   RUN_TEST(test_hub_ports_from_a_whole_hub_descriptor_only);
+  RUN_TEST(test_a_reconnect_dumps_nothing_again);
+  RUN_TEST(test_a_full_table_still_dumps_new_devices);
   return UNITY_END();
 }

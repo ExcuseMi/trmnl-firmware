@@ -40,6 +40,25 @@ bool usb_probe_report_upto(usb_probe_t *p, uint32_t first);
 // `*count` is the total
 bool usb_probe_summary(usb_probe_t *p, uint32_t now, uint32_t *count);
 
+// ---- once per boot: a reconnect does not dump again (owner's X 2026-11-03: each tablet reconnect wrote about 25
+// lines, descriptor and first reports, and pushed the crash line out of the event log) ----
+
+#define USB_PROBE_ONCE_MAX 16 // interfaces remembered; more: dumped every time
+
+typedef struct {
+  uint16_t vid[USB_PROBE_ONCE_MAX], pid[USB_PROBE_ONCE_MAX];
+  uint8_t iface[USB_PROBE_ONCE_MAX];
+  uint8_t n;
+} usb_probe_once_t;
+
+// Interface `iface` of vid:pid connected: true when it was not seen since `t` was zeroed (dump its descriptor and its
+// first reports), false for a reconnect; true when the table is full
+bool usb_probe_once(usb_probe_once_t *t, uint16_t vid, uint16_t pid, uint8_t iface);
+
+// The reports logged in full: `pen` (a tablet or mouse) USB_PROBE_PEN_REPORTS, else USB_PROBE_FULL_REPORTS; none when
+// the interface was dumped before (`first` false)
+uint32_t usb_probe_first_reports(bool first, bool pen);
+
 // ---- a device's power and a hub's ports (src/usb_dev_log.cpp logs them when a device enumerates) ----
 
 // A configuration's bMaxPower (2 mA units at full speed) in mA

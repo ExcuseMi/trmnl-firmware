@@ -52,6 +52,23 @@ bool usb_probe_summary(usb_probe_t *p, uint32_t now, uint32_t *count) {
   return true;
 }
 
+bool usb_probe_once(usb_probe_once_t *t, uint16_t vid, uint16_t pid, uint8_t iface) {
+  for (uint8_t i = 0; i < t->n && i < USB_PROBE_ONCE_MAX; i++) {
+    if (t->vid[i] == vid && t->pid[i] == pid && t->iface[i] == iface) return false;
+  }
+  if (t->n >= USB_PROBE_ONCE_MAX) return true;
+  t->vid[t->n] = vid;
+  t->pid[t->n] = pid;
+  t->iface[t->n] = iface;
+  t->n++;
+  return true;
+}
+
+uint32_t usb_probe_first_reports(bool first, bool pen) {
+  if (!first) return 0;
+  return pen ? USB_PROBE_PEN_REPORTS : USB_PROBE_FULL_REPORTS;
+}
+
 uint16_t usb_probe_max_ma(uint8_t bMaxPower) { return (uint16_t)(bMaxPower * 2u); }
 
 int usb_probe_hub_ports(const uint8_t *d, size_t len) {

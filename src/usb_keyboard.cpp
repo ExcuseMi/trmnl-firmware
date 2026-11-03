@@ -45,9 +45,11 @@ typedef struct {
   bool mouse; // a mouse: its reports draw as the pen (usb_pen_x.h)
   usb_mouse_layout_t ml; // the mouse's report layout
   usb_probe_t pr;
+  bool first; // not seen this boot (usb_probe_once): its first reports are logged
 } probe_slot_t;
 static uint8_t pen_mode_logged; // APP_PEN_MODE_* already in the event log for the tablet now on
 static probe_slot_t probes[PROBE_SLOTS];
+static usb_probe_once_t dumped; // the interfaces whose descriptor and first reports are in the log this boot
 
 static bool mouse_open(void) {
   for (const probe_slot_t &ps : probes) {
@@ -112,7 +114,7 @@ static void iface_cb(hid_host_device_handle_t h, const hid_host_interface_event_
     if (ps) {
       r.seq = ps->pr.total + 1;
       // counted; past the first ones not queued (a tablet's first ones are logged too: which interface sends what)
-      if (!usb_probe_report_upto(&ps->pr, pen ? USB_PROBE_PEN_REPORTS : USB_PROBE_FULL_REPORTS)) break;
+      if (!usb_probe_report_upto(&ps->pr, usb_probe_first_reports(ps->first, pen))) break;
     }
     xQueueSend(report_q, &r, 0); // a full queue drops it; never wait in the driver's task
     break;
@@ -278,16 +280,20 @@ static bool host_stop(uint32_t deadline, bool boost_on) {
   return true;
 }
 
-// Logs the device and the interface with its report descriptor in hex (the probe: what does an unknown device send?)
-static void log_interface(hid_host_device_handle_t h, const hid_host_dev_params_t &p) {
+// Logs the device and the interface with its report descriptor in hex (the probe: what does an unknown device send?);
+// a reconnect of one seen this boot only its first line. True when it was dumped (its first reports are logged too)
+static bool log_interface(hid_host_device_handle_t h, const hid_host_dev_params_t &p) {
   hid_host_dev_info_t info;
   bool got = hid_host_get_device_info(h, &info) == ESP_OK;
-  evlog_add("HID i%u sc%u p%u %04x:%04x", p.iface_num, p.sub_class, p.proto, got ? info.VID : 0, got ? info.PID : 0);
+  bool first = !got || usb_probe_once(&dumped, info.VID, info.PID, p.iface_num);
+  evlog_add("HID i%u sc%u p%u %04x:%04x%s", p.iface_num, p.sub_class, p.proto, got ? info.VID : 0, got ? info.PID : 0,
+            first ? "" : ", seen this boot");
+  if (!first) return false;
   size_t len = 0;
   const uint8_t *d = hid_host_get_report_descriptor(h, &len);
   if (!d || !len) {
     evlog_add("HID i%u: no report descriptor", p.iface_num);
-    return;
+    return true;
   }
   size_t lines = usb_probe_desc_lines(len);
   for (size_t l = 0; l < lines; l++) {
@@ -297,6 +303,7 @@ static void log_interface(hid_host_device_handle_t h, const hid_host_dev_params_
     evlog_add("HID i%u d%u/%u @%u: %s", p.iface_num, (unsigned)(l + 1), (unsigned)lines, (unsigned)off, hex);
   }
   if (len > USB_PROBE_DESC_MAX) evlog_add("HID i%u descriptor %u bytes, first %u shown", p.iface_num, (unsigned)len, USB_PROBE_DESC_MAX);
+  return true;
 }
 
 static bool pen_open(void) {
@@ -342,7 +349,7 @@ static void open_interface(hid_host_device_handle_t h) {
     evlog_add("HID i%u: open failed: %s", p.iface_num, esp_err_to_name(rc));
     return;
   }
-  log_interface(h, p);
+  bool first = log_interface(h, p);
   if (as_kbd && got_info) usb_dev_log_kind(info.VID, info.PID, "keyboard"); // the X's page, Devices
   if (as_kbd) {
     open_dev = h;
@@ -362,6 +369,7 @@ static void open_interface(hid_host_device_handle_t h) {
       }
     }
     usb_probe_init(&ps->pr, millis());
+    ps->first = first;
     hid_class_request_set_protocol(h, ps->mouse && ps->ml.report_id == 0 && p.sub_class == HID_SUBCLASS_BOOT_INTERFACE
                                           ? HID_REPORT_PROTOCOL_BOOT
                                           : HID_REPORT_PROTOCOL_REPORT); // not fatal
