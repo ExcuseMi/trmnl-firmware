@@ -70,7 +70,7 @@ IQS323 iqs323;
 // Forward declarations
 static void iqs323_task_main(void *pvParameters);
 static bool iqs323_do_init(bool use_wake_stub);
-static void iqs323_do_prepare_sleep(void);
+static bool iqs323_do_prepare_sleep(void);
 static bool iqs323_hardware_reset(void);
 static void iqs323_publish_snapshot(void);
 
@@ -492,11 +492,15 @@ static void iqs323_task_main(void *pvParameters)
         // Handle sleep request
         if (events & IQS323_EVT_SLEEP_REQUEST) {
             Serial.println("IQS323 Task: Sleep preparation requested");
+            iqs323_task_state_t before = current_state;
             current_state = IQS323_TASK_STATE_PREPARING_SLEEP;
-            iqs323_do_prepare_sleep();
-            current_state = IQS323_TASK_STATE_SLEEPING;
-            xEventGroupSetBits(iqs323_event_group, IQS323_EVT_SLEEP_DONE);
-            Serial.println("IQS323 Task: Sleep preparation complete");
+            if (iqs323_do_prepare_sleep()) { // failed: no SLEEP_DONE, the caller's wait times out and may retry
+                current_state = IQS323_TASK_STATE_SLEEPING;
+                xEventGroupSetBits(iqs323_event_group, IQS323_EVT_SLEEP_DONE);
+                Serial.println("IQS323 Task: Sleep preparation complete");
+            } else {
+                current_state = before;
+            }
             continue;
         }
 
@@ -690,11 +694,12 @@ static bool iqs323_do_init(bool use_wake_stub)
 /**
  * @brief Prepare IQS323 for deep sleep
  */
-static void iqs323_do_prepare_sleep(void)
+// False when event mode could not be set (the touch bar then may not wake the X, sleep_touch.h)
+static bool iqs323_do_prepare_sleep(void)
 {
     if (xSemaphoreTake(iqs323_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
         Serial.println("IQS323 Task: Failed to acquire mutex for sleep prep");
-        return;
+        return false;
     }
 
     Serial.println("IQS323 Task: Reading final values before sleep");
@@ -714,6 +719,7 @@ static void iqs323_do_prepare_sleep(void)
     Serial.println("IQS323 Task: IQS323 ready for sleep");
 
     xSemaphoreGive(iqs323_mutex);
+    return true;
 }
 
 /**

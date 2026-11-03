@@ -22,6 +22,7 @@
 #include <refresh_interval.h>
 #include <sleep_duration.h>
 #include <sleep_session.h>
+#include <sleep_touch.h>
 #include <status_screens.h>
 #include <trmnl_log.h>
 
@@ -90,9 +91,16 @@ void goToSleep(void) {
   usb_port_serial_now(); // never sleep with the port left to an app's USB host mode
   Log_info("Preparing IQS323 for sleep via task...");
 
-  // Use task manager for sleep preparation (sets event mode, checks I2C health)
-  if (!iqs323_task_prepare_sleep(5000)) {
-    Log.warning("IQS323 sleep preparation timeout - proceeding anyway\n");
+  // Use task manager for sleep preparation (sets event mode, checks I2C health); failed twice: a short sleep only
+  // (sleep_touch.h), the touch bar may not wake the X
+  int touch_tries = 1;
+  bool touch_ready = iqs323_task_prepare_sleep(5000);
+  if (!touch_ready) {
+    Log.warning("IQS323 sleep preparation timeout - trying once more\n");
+    task_watch_x_feed();
+    touch_tries = 2;
+    touch_ready = iqs323_task_prepare_sleep(5000);
+    if (!touch_ready) Log_error("IQS323 sleep preparation failed twice - sleeping %d s only", SLEEP_TOUCH_FAILED_S);
   }
 
   touchbar_prepare_for_sleep();
@@ -107,9 +115,17 @@ void goToSleep(void) {
   config_gpio_for_lp();
 #endif
 
+  uint32_t time_to_sleep = refreshInterval.seconds();
+#if BOARD_TRMNL_X
+  {
+    char line[128];
+    sleep_touch_line(line, sizeof(line), time_to_sleep, touch_tries, touch_ready);
+    Log_event("%s", line); // every sleep in the event log (owner's X 2026-11-03: an hour asleep, nothing said)
+    time_to_sleep = sleep_touch_seconds(time_to_sleep, touch_ready);
+  }
+#endif
   evlog_flush(true); // the event log, before the file system goes
   filesystem_deinit();
-  uint32_t time_to_sleep = refreshInterval.seconds();
   iPrevWakeTime = millis() - startup_time; // save for statistics
   Log.info("%s [%d]: total awake time - %d ms\r\n", __FILE__, __LINE__, iPrevWakeTime);
   Log.info("%s [%d]: time to sleep - %d\r\n", __FILE__, __LINE__, time_to_sleep);
