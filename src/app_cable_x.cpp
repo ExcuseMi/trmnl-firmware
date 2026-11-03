@@ -29,6 +29,7 @@
 #include "nvs_stats_x.h"
 #include "evlog.h"
 #include "usb_port_role.h"
+#include "task_watch_x.h"
 
 #define TASK_POLL_MS 20
 #define RECEIVE_SCREEN "Receive over USB" // the menu screen reads the port itself
@@ -213,7 +214,7 @@ static bool rm_command(const char *line) {
 
 bool app_cable_x_command(const char *line) {
   return evlog_serial_command(line) || app_storage_serial_command(line) || nvs_stats_serial_command(line) ||
-         run_command(line) || rm_command(line);
+         run_command(line) || rm_command(line) || task_watch_x_command(line);
 }
 
 // Serial was begun by bootEarly before this task starts (test_serial_begin): a begin() here raced it on the other core

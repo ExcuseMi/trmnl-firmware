@@ -1,5 +1,6 @@
 #ifdef BOARD_TRMNL_X
 #include "evlog.h"
+#include "task_watch_x.h"
 #include "usb_port_role.h"
 #endif
 #include <app_cable.h>
@@ -46,7 +47,12 @@ void goToSleep(void) {
   // A cable upload under way, or a host still sending, first (app_cable.h: app_cable_sleep_hold)
   const uint32_t asked = millis();
   if (app_cable_sleep_hold(asked, asked)) Log_info("Sleep: waiting for the USB cable upload");
-  while (app_cable_sleep_hold(asked, millis())) delay(50);
+  while (app_cable_sleep_hold(asked, millis())) {
+#ifdef BOARD_TRMNL_X
+    task_watch_x_feed(); // bounded by the upload's own limits (app_cable.h), not by the watchdog
+#endif
+    delay(50);
+  }
   // An app owns the device until it exits (app_sleep_gate.h): no TRMNL sleep under it
   if (app_sleep_gate_ask("goToSleep") == APP_SLEEP_REFUSED) {
     if (app_sleep_gate_screen_name()) {
@@ -63,7 +69,14 @@ void goToSleep(void) {
     app_resume_sleeping(persistence, app_sleep_gate_app()); // no app runs: nothing comes back on the wake
   }
   Log.info("%s [%d]: go to sleep\r\n", __FILE__, __LINE__);
+#ifdef BOARD_TRMNL_X
+  task_watch_x_pause_t paused; // a request with the network's own timeouts (after an app that used Wi-Fi)
+  task_watch_x_pause(&paused);
+#endif
   submitStoredLogs();
+#ifdef BOARD_TRMNL_X
+  task_watch_x_resume(&paused);
+#endif
 
 // DEBUG - workaround to prevent crash in the WiFi stack of unknown origin
 #ifndef PARALLEL_EPD

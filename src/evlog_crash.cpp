@@ -24,6 +24,8 @@ typedef struct {
   uint32_t pc, core, nbt;
   uint32_t bt[EVLOG_CRASH_BT]; // the first backtrace addresses
   char reason[32];
+  char wdt_task[16]; // the task watchdog's note (evlog_crash_watchdog): the watched task fed longest ago
+  uint32_t wdt_age_ms;
 } rtc_log_t;
 
 RTC_NOINIT_ATTR static rtc_log_t rtc;
@@ -93,6 +95,10 @@ int evlog_crash_take(bool crashed, evlog_pending_t *out, int max, char *crash, s
     } else {
       at = (size_t)snprintf(crash, crash_len, "crash: no panic record (watchdog reset or brownout)");
     }
+    rtc.wdt_task[sizeof(rtc.wdt_task) - 1] = '\0';
+    if (rtc.wdt_task[0] && at < crash_len)
+      at += (size_t)snprintf(crash + at, crash_len - at, ", watchdog: %s not fed for %lu ms", rtc.wdt_task,
+                             (unsigned long)rtc.wdt_age_ms);
     if (at < crash_len) {
       if (rtc.app[0]) snprintf(crash + at, crash_len - at, ", app %s entry 0x%08lx", rtc.app, (unsigned long)rtc.app_entry);
       else snprintf(crash + at, crash_len - at, ", no app");
@@ -101,6 +107,14 @@ int evlog_crash_take(bool crashed, evlog_pending_t *out, int max, char *crash, s
   uint16_t b = rtc.boot;
   rtc_reset(b);
   return n;
+}
+
+void evlog_crash_watchdog(const char *task, uint32_t age_ms) {
+  if (!rtc_ok()) rtc_reset(0);
+  size_t i = 0;
+  for (const char *c = task; c && *c && i + 1 < sizeof(rtc.wdt_task); c++) rtc.wdt_task[i++] = *c;
+  rtc.wdt_task[i] = '\0';
+  rtc.wdt_age_ms = age_ms;
 }
 
 void evlog_crash_set_boot(uint16_t boot) {

@@ -20,6 +20,7 @@
 #include "drive_littlefs.h"
 #include "usb_drive_msc.h"
 #include "usb_port_role.h"
+#include "task_watch_x.h"
 
 #define DRIVE_TIMEOUT_MS 60000
 #define DRIVE_IMG_MAX (6u * 1024 * 1024)
@@ -147,7 +148,10 @@ static void end(drive_end_t why) {
   d.result.cut = d.session.writes && !take;
   if (take) {
     drive_import_result_t r;
+    task_watch_x_pause_t paused; // the import's length follows what the computer wrote: not one turn of a loop
+    task_watch_x_pause(&paused);
     int rc = drive_import(&d.fs, d.img, d.img_size, &d.manifest, &r);
+    task_watch_x_resume(&paused);
     d.result.result = rc < 0 ? (rc == DRIVE_EIMAGE ? APP_EIO : app_error(rc)) : 0;
     d.result.taken = rc == DRIVE_OK;
     d.result.added = (uint16_t)r.added;

@@ -3,6 +3,7 @@
 
 #include "evlog.h"
 #include "evlog_crash.h"
+#include <app_resume.h>
 #include "serial_out_hw.h"
 #include "webshare.h" // webshare_fs_root
 
@@ -122,7 +123,7 @@ void evlog_begin(void) {
   bool loaded = n && evlog_ring_load(&ring, snap, n);
   if (n && !loaded) Log_error("Event log: %s unreadable (%u bytes), started empty", EVLOG_FILE, (unsigned)n);
   esp_reset_reason_t why = esp_reset_reason();
-  bool crashed = why == ESP_RST_PANIC || why == ESP_RST_INT_WDT || why == ESP_RST_TASK_WDT || why == ESP_RST_WDT;
+  bool crashed = app_reset_of(why) == APP_RESET_CRASH; // app_resume.h, as the app runner decides
   // the last boot's events not yet in the file, and a crash's record, from RTC memory
   static evlog_pending_t pending[EVLOG_CRASH_PENDING];
   char crash[EVLOG_TEXT_MAX + 1];

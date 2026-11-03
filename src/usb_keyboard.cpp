@@ -21,6 +21,7 @@
 #include "usb_dev_log.h"
 #include "usb_pen_x.h"
 #include "usb_port_role.h"
+#include "task_watch_x.h"
 
 #define IOX_CHG_PG       0 // input, low: the charger has input power (VBUS from a charger or computer)
 #define IOX_OTG_EN       1 // output, high: the charger's boost drives VBUS
@@ -144,7 +145,9 @@ static volatile bool lib_stop;
 static void lib_loop(void *arg) {
   (void)arg;
   bool freeing = false;
+  task_watch_x_begin("usb_lib"); // a library call that never returns would keep the port in host mode
   while (true) {
+    task_watch_x_feed();
     uint32_t flags = 0;
     usb_host_lib_handle_events(pdMS_TO_TICKS(50), &flags);
     if (freeing && (flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE)) break;
@@ -154,6 +157,7 @@ static void lib_loop(void *arg) {
     }
   }
   usb_host_uninstall();
+  task_watch_x_end();
   lib_task = nullptr;
   vTaskDelete(nullptr);
 }
@@ -480,7 +484,11 @@ static void port_loop(void *arg) {
   bst.on = true; // device mode: nothing to switch on
   usb_power_t last_power = USB_POWER_UNKNOWN;
   uint32_t gone_at = 0;
+  // Watched: the task that holds host mode. Its longest legal turn is a host stop (STOP_DEADLINE_MS, else a restart),
+  // the charger's lock wait (USB_POWER_LOCK_WAIT_MS) and a boost switch (200 ms): far below TASK_WATCH_TIMEOUT_S
+  task_watch_x_begin("usb_port");
   while (true) {
+    task_watch_x_feed();
     hid_host_device_handle_t h;
     if (xQueueReceive(conn_q, &h, pdMS_TO_TICKS(USB_PORT_POLL_MS)) == pdTRUE && applied == USB_PORT_HOST) {
       open_interface(h);
@@ -549,6 +557,7 @@ static void port_loop(void *arg) {
     }
     if (stop_task && applied == USB_PORT_DEVICE) break;
   }
+  task_watch_x_end();
   port_task = nullptr;
   vTaskDelete(nullptr);
 }

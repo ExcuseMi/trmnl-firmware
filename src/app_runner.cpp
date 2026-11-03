@@ -51,6 +51,7 @@
 #include "usb_pen_x.h"
 #include "webshare.h"
 #include "app_settings_x.h"
+#include "task_watch_x.h"
 
 #define APP_POLL_MS       20
 #define APP_KEY_IDLE_MS   50 // after a lone ESC: the Escape key, not the start of a sequence
@@ -263,6 +264,7 @@ static bool app_supervise(PreferencesPersistence &persistence) {
   bool marked_started = false, marked_input = false;
   uint32_t exit_asked = 0;
   while (xSemaphoreTake(app_host.done, pdMS_TO_TICKS(APP_POLL_MS)) != pdTRUE) {
+    task_watch_x_feed(); // one turn: a step below that blocks for TASK_WATCH_TIMEOUT_S restarts the X
     if (!marked_started && millis() - started >= APP_RESUME_STARTED_MS) {
       app_resume_started(persistence);
       app_install_started(persistence, webshare_fs_root(), app_host.name);
@@ -341,6 +343,7 @@ static bool app_supervise(PreferencesPersistence &persistence) {
 static bool apps_run_once(const char *path, const char *arg, char *next, size_t next_len, char *next_arg,
                           size_t next_arg_len) {
   PreferencesPersistence persistence(preferences);
+  task_watch_x_begin("loop"); // watched until the sleep or restart that ends this wake (task_watch_x.h)
   app_host_clear_launch(); // a launch of an app that did not return by itself never counts
   app_host_set_arg(arg); // "" after a menu start or a resume: a restart never brings back an old argument
   memset(&app_host, 0, sizeof(app_host));
@@ -416,6 +419,7 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   app_pulse_x_end();
   const char *how =app_idle_closed_min ? "closed by the idle limit" : app_exit_asked ? "after a long press" : code == 0 ? "quit by itself" : "error";
   Log_event("Apps: %s ended with %d (%s)", app_host.name, code, how);
+  task_watch_x_feed();
   keyboards_end(); // the USB port back in device mode before anything else
   usb_port_give(usb_port_role()); // whatever still holds the PHY: serial again (usb_port_role.h)
   touchbar_input_end();
@@ -423,7 +427,9 @@ static bool apps_run_once(const char *path, const char *arg, char *next, size_t 
   webshare_stop(); // the page never outlives the app
   app_settings_x_end(); // the settings form goes with the app
   espnow_app_stop(); // nor ESP-NOW: the original MAC back, the radio off (a crash restarts with the eFuse MAC)
+  task_watch_x_feed();
   display_ink_wait_idle(DISPLAY_INK_WAIT_MS); // the app's last ink, before the panel lock goes and TRMNL draws
+  task_watch_x_feed(); // the error screen or the last image (a decode and a full refresh) next
   app_host_close_files();
   esp_elf_deinit(&elf);
   vQueueDelete(app_host.events);
@@ -565,7 +571,9 @@ void apps_install_session(const char *section) {
   touchbar_input_begin("Install via Wi-Fi");
   bool test_page = false, wifi = false;
   static wsw_join_t join; // This X > Wi-Fi > Join: tried once the page has closed
+  task_watch_x_begin("loop"); // also when the menu opened this page (task_watch_x.h)
   while (true) {
+    task_watch_x_feed();
     delay(APP_POLL_MS * 5);
     if (pump_touch()) break;
     if (webshare_portal_take_test()) { // Devices > Printer > test page: the Print app prints it
@@ -590,7 +598,10 @@ void apps_install_session(const char *section) {
   if (wifi) {
     char ssid[sizeof(join.ssid)];
     snprintf(ssid, sizeof(ssid), "%s", join.ssid);
+    task_watch_x_pause_t paused; // the join waits for the modem's own timeouts, not one turn of a loop
+    task_watch_x_pause(&paused);
     wsw_result_t w = wifi_switch_x(&join);
+    task_watch_x_resume(&paused);
     snprintf(session_note, sizeof(session_note), w == WSW_JOINED ? "Now on \"%s\"" : "Could not join \"%s\": kept the old network", ssid);
     apps_install_session(nullptr); // the page again, on the network in use; does not return
   }
@@ -615,10 +626,13 @@ void apps_resume_if_due(void) {
   app_install_recover(persistence, webshare_fs_root(), restored, sizeof(restored)); // a start that crashed
   if (restored[0]) Log_error("Apps: %s crashed while starting, the previous version was put back", restored);
   esp_reset_reason_t reason = esp_reset_reason();
-  bool crashed = reason == ESP_RST_PANIC || reason == ESP_RST_INT_WDT || reason == ESP_RST_TASK_WDT ||
-                 reason == ESP_RST_WDT;
+  static_assert(ESP_RST_PANIC == APP_RST_PANIC && ESP_RST_INT_WDT == APP_RST_INT_WDT &&
+                    ESP_RST_TASK_WDT == APP_RST_TASK_WDT && ESP_RST_WDT == APP_RST_WDT &&
+                    ESP_RST_DEEPSLEEP == APP_RST_DEEPSLEEP,
+                "app_resume.h: ESP-IDF's reset reasons");
+  app_reset_t how = app_reset_of(reason); // a task watchdog restart is a crash: the hung app is not reopened
+  bool crashed = how == APP_RESET_CRASH;
   char path[APPS_PATH_MAX];
-  app_reset_t how = crashed ? APP_RESET_CRASH : reason == ESP_RST_DEEPSLEEP ? APP_RESET_SLEEP_WAKE : APP_RESET_RESTART;
   app_resume_t due = app_resume_take(persistence, how, path, sizeof(path));
   if (due == APP_RESUME_NONE) {
     if (crashed) Log_event("Apps: reset by a crash (%d), no app resumed", reason);

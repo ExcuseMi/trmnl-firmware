@@ -29,6 +29,10 @@ void evlog_crash_app(const char *name, uint32_t entry);
 // `crash` ("" otherwise); *boot is the boot they belong to. Clears the record. Returns the events
 int evlog_crash_take(bool crashed, evlog_pending_t *out, int max, char *crash, size_t crash_len, uint16_t *boot);
 
+// The task watchdog fires (task_watch_x.cpp, from its interrupt): the watched task fed longest ago, in the next
+// crash line ("watchdog: loop not fed for 30012 ms")
+void evlog_crash_watchdog(const char *task, uint32_t age_ms);
+
 // Hooks the panic handler (once, at boot)
 void evlog_crash_begin(void);
 

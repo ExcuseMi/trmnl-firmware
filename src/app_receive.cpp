@@ -21,6 +21,7 @@
 #include "app_receive.h"
 #include "evlog.h"
 #include "serial_out_hw.h"
+#include "task_watch_x.h"
 #include "webshare.h" // webshare_fs_root
 
 #define APP_UPLOAD_STALL_MAX_MS 30000u // a TX ring that never empties still ends the upload (serial_hold.h)
@@ -101,6 +102,7 @@ app_upload_result_t apps_receive_tmp(const app_upload_header_t &h) {
   uint32_t got = 0, crc = 0, in_block = 0, last = millis(), tx_waiting = last;
   bool write_failed = false;
   while (got < h.size && !serial_hold_rx_gave_up(millis(), last, tx_waiting, APP_UPLOAD_IDLE_MS, APP_UPLOAD_STALL_MAX_MS)) {
+    task_watch_x_feed(); // the loop receives while an app runs: ended by the upload's own idle and stall limits
     if (Serial.availableForWrite() < SERIAL_TX_RING_BYTES) tx_waiting = millis(); // our ACK not out yet
     int avail = Serial.available();
     if (avail <= 0) {
