@@ -149,6 +149,10 @@ usb_power_t usb_power_update(usb_power_reading_t *r, uint32_t now, bool got, boo
   return r->last;
 }
 
+uint32_t usb_power_lock_wait_ms(const usb_power_reading_t *r, uint32_t now) {
+  return (uint32_t)(now - r->at) >= USB_POWER_WAIT_AFTER_MS ? USB_POWER_LOCK_WAIT_MS : 0;
+}
+
 // ---- the boost's switch-on ----
 
 void usb_boost_init(usb_boost_t *b, uint32_t now_ms) {

@@ -117,6 +117,15 @@ void usb_power_reading_init(usb_power_reading_t *r);
 // One poll at `now_ms`; returns what usb_port_input_t.power gets
 usb_power_t usb_power_update(usb_power_reading_t *r, uint32_t now_ms, bool got, bool input_power);
 
+// How long this poll waits for the lock: 0 while the reading is fresh, USB_POWER_LOCK_WAIT_MS once it is
+// USB_POWER_WAIT_AFTER_MS old. Back-to-back ink updates while drawing (one after another for minutes) left no free
+// moment for a poll that never waits: the reading went stale after 30 s, "charger unreadable" stopped host mode and
+// switched the boost off under the tablet (fw-latest29, 2026-11-03). A waiting take gets the lock between two updates
+// (the mutex's priority inheritance hurries the holder; the port task outranks the ink task).
+#define USB_POWER_WAIT_AFTER_MS 5000
+#define USB_POWER_LOCK_WAIT_MS 1500
+uint32_t usb_power_lock_wait_ms(const usb_power_reading_t *r, uint32_t now_ms);
+
 // ---- the boost's switch-on ----
 
 // The boost pin is on the expander too, behind the same lock. One 200 ms try on entering host mode failed in a

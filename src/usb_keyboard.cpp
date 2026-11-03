@@ -72,7 +72,7 @@ static void expander_unlock(void) {
 
 static usb_power_t read_power(void) {
   static usb_power_reading_t reading = {USB_POWER_UNKNOWN, 0};
-  bool got = expander_lock(0), input_power = false;
+  bool got = expander_lock(usb_power_lock_wait_ms(&reading, millis())), input_power = false; // usb_port.h
   if (got) {
     bbep.ioPinMode(IOX_CHG_PG, INPUT);
     input_power = bbep.ioRead(IOX_CHG_PG) == 0;
@@ -211,6 +211,19 @@ static void close_handles(void) {
   if (had_mouse) usb_pen_x_mouse_detach();
 }
 
+#if CONFIG_USB_HOST_HUBS_SUPPORTED
+// ESP-IDF's ext_hub.c as CMakeLists.txt patches it: a hub's second release counted instead of asserted (fw-latest29)
+extern "C" uint32_t trmnl_ext_hub_second_releases;
+static void log_hub_second_releases(void) {
+  static uint32_t logged;
+  uint32_t n = trmnl_ext_hub_second_releases;
+  if (n != logged) evlog_add("USB keys: a hub released twice, ignored (%lu times since boot)", (unsigned long)n);
+  logged = n;
+}
+#else
+static void log_hub_second_releases(void) {}
+#endif
+
 // Stops the USB stack in usb_stop_plan's order (usb_port.h: the boost last); false if a step did not end by `deadline`
 static bool host_stop(uint32_t deadline, bool boost_on) {
   for (int i = 0; i < USB_STOP_STEPS; i++) {
@@ -246,6 +259,7 @@ static bool host_stop(uint32_t deadline, bool boost_on) {
         delay(10);
       }
       usb_port_give(USB_ROLE_HOST);
+      log_hub_second_releases(); // the library has ended: every release it was going to do is done
       break;
     case USB_STOP_BOOST_OFF:
       if (boost_on && !boost(false, BOOST_OFF_WAIT_MS)) {

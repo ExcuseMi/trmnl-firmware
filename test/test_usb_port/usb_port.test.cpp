@@ -278,6 +278,31 @@ void test_a_lock_held_for_good_reads_as_unknown() {
   TEST_ASSERT_EQUAL(USB_POWER_UNKNOWN, usb_power_update(&reading, now, false, false)); // a hang, not a refresh
 }
 
+// fw-latest29, 2026-11-03: drawing in Sketch kept the ink task updating back to back; a poll that never waits found
+// the lock busy every time for 30 s, "charger unreadable" ended host mode and the boost went off under the tablet. A
+// poll that waits (usb_power_lock_wait_ms) gets the lock between two updates; one that does not wait never does.
+void test_drawing_for_minutes_keeps_host_mode() {
+  usb_power_reading_init(&reading);
+  usb_power_update(&reading, now, true, false);
+  run(1000, true, USB_POWER_NO, true);
+  TEST_ASSERT_EQUAL(USB_PORT_HOST, p.mode);
+  TEST_ASSERT_EQUAL(0, usb_power_lock_wait_ms(&reading, now)); // fresh: no wait (no stall per poll)
+  bool host = true;
+  uint32_t waits = 0;
+  for (uint32_t t = 0; t < 120000; t += USB_PORT_POLL_MS) {
+    now += USB_PORT_POLL_MS;
+    uint32_t wait = usb_power_lock_wait_ms(&reading, now);
+    TEST_ASSERT_TRUE(wait <= USB_POWER_LOCK_WAIT_MS);
+    bool got = wait > 0; // the lock is never free at a glance, always within one ink update
+    waits += got;
+    usb_port_input_t in = {true, usb_power_update(&reading, now, got, false), true};
+    host = host && usb_port_step(&p, now, &in) == USB_PORT_HOST;
+  }
+  TEST_ASSERT_TRUE_MESSAGE(host, "two minutes of drawing dropped host mode (charger unreadable)");
+  TEST_ASSERT_EQUAL(USB_WHY_KEYBOARD, p.why);
+  TEST_ASSERT_TRUE(waits <= 120000 / USB_POWER_WAIT_AFTER_MS + 1); // a wait only once per USB_POWER_WAIT_AFTER_MS
+}
+
 // ---- the PHY's roles: the keyboard's host mode and the USB drive never take it from each other ----
 
 void test_roles_start_serial_and_one_role_at_a_time() {
@@ -390,6 +415,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_a_long_refresh_keeps_host_mode);
   RUN_TEST(test_after_the_lock_a_charger_still_ends_host_mode);
   RUN_TEST(test_a_lock_held_for_good_reads_as_unknown);
+  RUN_TEST(test_drawing_for_minutes_keeps_host_mode);
   RUN_TEST(test_never_boost_while_powered_or_unreadable);
   RUN_TEST(test_never_host_while_powered_without_an_app);
   RUN_TEST(test_outside_power_host_with_the_boost_off_after_the_clear_time);
