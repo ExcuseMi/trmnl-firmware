@@ -358,24 +358,22 @@ static void open_interface(hid_host_device_handle_t h) {
     ps->iface = p.iface_num;
     ps->pen = pen;
     ps->mouse = false;
-    if (pen == USB_PEN_IFACE_NONE) { // a mouse: a boot one in boot protocol, else one whose descriptor holds a mouse
+    usb_mouse_pick_t pick = USB_MOUSE_PICK_NONE;
+    if (pen == USB_PEN_IFACE_NONE) { // a mouse: one whose descriptor holds a mouse, else a boot one in boot protocol
       size_t dlen = 0;
       const uint8_t *desc = hid_host_get_report_descriptor(h, &dlen);
-      if (p.sub_class == HID_SUBCLASS_BOOT_INTERFACE && p.proto == HID_PROTOCOL_MOUSE) {
-        usb_mouse_boot_layout(&ps->ml);
-        ps->mouse = true;
-      } else if (desc && usb_mouse_map_parse(desc, dlen, &ps->ml)) {
-        ps->mouse = true;
-      }
+      pick = usb_mouse_pick(desc, dlen,
+                            p.sub_class == HID_SUBCLASS_BOOT_INTERFACE && p.proto == HID_PROTOCOL_MOUSE, &ps->ml);
+      ps->mouse = pick != USB_MOUSE_PICK_NONE;
     }
     usb_probe_init(&ps->pr, millis());
     ps->first = first;
-    hid_class_request_set_protocol(h, ps->mouse && ps->ml.report_id == 0 && p.sub_class == HID_SUBCLASS_BOOT_INTERFACE
-                                          ? HID_REPORT_PROTOCOL_BOOT
-                                          : HID_REPORT_PROTOCOL_REPORT); // not fatal
-    if (ps->mouse) {
-      evlog_add("Mouse %04x:%04x i%u: %s", got_info ? info.VID : 0, got_info ? info.PID : 0, p.iface_num,
-                p.sub_class == HID_SUBCLASS_BOOT_INTERFACE ? "boot protocol" : "report protocol");
+    esp_err_t prc = hid_class_request_set_protocol(
+        h, pick == USB_MOUSE_PICK_BOOT ? HID_REPORT_PROTOCOL_BOOT : HID_REPORT_PROTOCOL_REPORT); // not fatal
+    if (ps->mouse) { // what was set and how its reports are read (subclass boot alone says neither)
+      evlog_add("Mouse %04x:%04x i%u: %s protocol%s, report id %u, %u bits", got_info ? info.VID : 0,
+                got_info ? info.PID : 0, p.iface_num, pick == USB_MOUSE_PICK_BOOT ? "boot" : "report",
+                prc == ESP_OK ? "" : " (not acked)", ps->ml.report_id, ps->ml.report_bits);
       usb_pen_x_mouse_attach(got_info ? info.VID : 0, got_info ? info.PID : 0);
     }
     if (pen != USB_PEN_IFACE_NONE) {

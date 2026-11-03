@@ -149,6 +149,13 @@ bool usb_mouse_map_parse(const uint8_t *map, size_t len, usb_mouse_layout_t *out
   return true;
 }
 
+usb_mouse_pick_t usb_mouse_pick(const uint8_t *map, size_t len, bool boot_iface, usb_mouse_layout_t *out) {
+  if (map && usb_mouse_map_parse(map, len, out)) return USB_MOUSE_PICK_REPORT; // some ignore SET_PROTOCOL(BOOT)
+  if (!boot_iface) return USB_MOUSE_PICK_NONE;
+  usb_mouse_boot_layout(out);
+  return USB_MOUSE_PICK_BOOT;
+}
+
 bool usb_mouse_report(const usb_mouse_layout_t *l, const uint8_t *d, size_t len, usb_mouse_move_t *out) {
   if (!l || !d || !out || l->x_bit < 0 || l->y_bit < 0) return false;
   if (l->report_id && (len == 0 || d[0] != l->report_id)) return false;

@@ -1,5 +1,6 @@
 #include <string.h>
 #include <unity.h>
+#include <usb_cursor.h>
 #include <usb_mouse.h>
 
 // A typical report-protocol mouse descriptor with a report ID (buttons 5, X Y 16 bit, wheel, as many receivers)
@@ -221,6 +222,64 @@ void test_info() {
   TEST_ASSERT_EQUAL(209664, i.width_um);
 }
 
+// The receiver 3367:1966 i0 (owner's X, 2026-11-03): a boot mouse interface whose reports carry report ID 1 and 16 bit
+// axes even after SET_PROTOCOL(BOOT). Read as boot reports the ID byte was the left button (tip held all along) and X
+// never moved: the cursor stood still. Its exact descriptor and reports from the event log
+static const uint8_t MAP_3367[] = {0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0x85, 0x01, 0x09, 0x01, 0xa1, 0x00, 0x05, 0x09,
+                                   0x19, 0x01, 0x29, 0x08, 0x15, 0x00, 0x25, 0x01, 0x95, 0x08, 0x75, 0x01, 0x81, 0x02,
+                                   0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x16, 0x00, 0x80, 0x26, 0xff, 0x7f, 0x75, 0x10,
+                                   0x95, 0x02, 0x81, 0x06, 0x09, 0x38, 0x15, 0x81, 0x25, 0x7f, 0x95, 0x01, 0x75, 0x08,
+                                   0x81, 0x06, 0x05, 0x0c, 0x0a, 0x38, 0x02, 0x95, 0x01, 0x81, 0x06, 0xc0, 0xc0};
+
+void test_boot_interface_with_a_mouse_descriptor_takes_the_descriptor() {
+  usb_mouse_layout_t l;
+  TEST_ASSERT_EQUAL(USB_MOUSE_PICK_REPORT, usb_mouse_pick(MAP_3367, sizeof(MAP_3367), true, &l));
+  TEST_ASSERT_EQUAL(1, l.report_id);
+  TEST_ASSERT_EQUAL(64, l.report_bits);
+  // no descriptor that holds a mouse: the boot layout on a boot interface, nothing on another one
+  TEST_ASSERT_EQUAL(USB_MOUSE_PICK_BOOT, usb_mouse_pick(MAP_KBD, sizeof(MAP_KBD), true, &l));
+  TEST_ASSERT_EQUAL(0, l.report_id);
+  TEST_ASSERT_EQUAL(USB_MOUSE_PICK_BOOT, usb_mouse_pick(nullptr, 0, true, &l));
+  TEST_ASSERT_EQUAL(USB_MOUSE_PICK_NONE, usb_mouse_pick(MAP_KBD, sizeof(MAP_KBD), false, &l));
+  TEST_ASSERT_EQUAL(USB_MOUSE_PICK_REPORT, usb_mouse_pick(MAP_ID, sizeof(MAP_ID), false, &l));
+}
+
+// The same bytes end to end: picked layout, report, the cursor (as src/usb_pen_x.cpp), pen events for the app
+void test_receiver_3367_moves_the_cursor_and_draws_with_the_left_button() {
+  usb_mouse_layout_t l;
+  usb_mouse_pick(MAP_3367, sizeof(MAP_3367), true, &l);
+  usb_cursor_t c;
+  usb_cursor_out_t o;
+  usb_cursor_init(&c, 1872, 1404);
+  usb_cursor_mouse_attach(&c, &o);
+  TEST_ASSERT_EQUAL(1, o.n);
+  const uint16_t x0 = o.ev[0].x, y0 = o.ev[0].y;
+  const uint8_t r1[] = {0x01, 0x00, 0x05, 0x00, 0xf9, 0xff, 0x00, 0x00}; // x +5, y -7
+  const uint8_t r2[] = {0x01, 0x00, 0x01, 0x00, 0xff, 0xff, 0x00, 0x00}; // x +1, y -1
+  const uint8_t r3[] = {0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00}; // x +2
+  const uint8_t *hover[] = {r1, r2, r3};
+  for (const uint8_t *r : hover) {
+    usb_mouse_move_t mv;
+    TEST_ASSERT_TRUE(usb_mouse_report(&l, r, 8, &mv));
+    TEST_ASSERT_EQUAL(0, mv.buttons);
+    usb_cursor_mouse_move(&c, &mv, &o);
+    TEST_ASSERT_EQUAL(1, o.n);
+    TEST_ASSERT_EQUAL(APP_PEN_IN_RANGE, o.ev[0].flags); // hover: in range, no tip
+  }
+  TEST_ASSERT_TRUE(o.ev[0].x > x0); // moved right by 8 counts
+  TEST_ASSERT_TRUE(o.ev[0].y < y0); // and up by 8
+  const uint16_t x1 = o.ev[0].x;
+  const uint8_t down[] = {0x01, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00}; // left button, x +4
+  usb_mouse_move_t mv;
+  TEST_ASSERT_TRUE(usb_mouse_report(&l, down, sizeof(down), &mv));
+  usb_cursor_mouse_move(&c, &mv, &o);
+  TEST_ASSERT_EQUAL(1, o.n);
+  TEST_ASSERT_EQUAL(APP_PEN_IN_RANGE | APP_PEN_TIP, o.ev[0].flags);
+  TEST_ASSERT_EQUAL(APP_PEN_TIP, o.ev[0].changed);
+  TEST_ASSERT_EQUAL(USB_MOUSE_PRESSURE, o.ev[0].pressure);
+  TEST_ASSERT_TRUE(o.ev[0].x > x1);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_boot_report_parses);
@@ -237,5 +296,7 @@ int main() {
   RUN_TEST(test_leaving_lets_everything_go);
   RUN_TEST(test_speed_setting_scales_motion);
   RUN_TEST(test_info);
+  RUN_TEST(test_boot_interface_with_a_mouse_descriptor_takes_the_descriptor);
+  RUN_TEST(test_receiver_3367_moves_the_cursor_and_draws_with_the_left_button);
   return UNITY_END();
 }

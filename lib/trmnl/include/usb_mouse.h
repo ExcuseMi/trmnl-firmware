@@ -31,6 +31,13 @@ void usb_mouse_boot_layout(usb_mouse_layout_t *out);
 // descriptor is cut off or too long
 bool usb_mouse_map_parse(const uint8_t *map, size_t len, usb_mouse_layout_t *out);
 
+typedef enum { USB_MOUSE_PICK_NONE, USB_MOUSE_PICK_BOOT, USB_MOUSE_PICK_REPORT } usb_mouse_pick_t;
+
+// Which layout an interface's reports have, and so which protocol to set: a descriptor that holds a mouse wins
+// (REPORT, the protocol a device starts in and the one its descriptor describes); else a boot mouse interface
+// (boot_iface: subclass boot, protocol mouse) takes the boot layout (BOOT). NONE: not a mouse. *out filled unless NONE
+usb_mouse_pick_t usb_mouse_pick(const uint8_t *map, size_t len, bool boot_iface, usb_mouse_layout_t *out);
+
 typedef struct {
   uint8_t buttons; // bit 0 left, 1 right, 2 middle
   int32_t dx, dy;
