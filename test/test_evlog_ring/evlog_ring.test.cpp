@@ -131,7 +131,7 @@ void test_records_that_do_not_add_up_load_as_an_empty_log() {
   reseal(img);
   TEST_ASSERT_FALSE(evlog_ring_load(&after, img, sizeof(img)));
   evlog_ring_save(&r, img, sizeof(img));
-  img[sizeof(evlog_hdr_t) + 11] = EVLOG_TEXT_MAX + 1; // a text length no record has
+  img[sizeof(evlog_hdr_t) + EVLOG_KEEP_BYTES + 11] = EVLOG_TEXT_MAX + 1; // a text length no record has
   reseal(img);
   TEST_ASSERT_FALSE(evlog_ring_load(&after, img, sizeof(img)));
   TEST_ASSERT_EQUAL(0, evlog_ring_count(&after));
@@ -192,6 +192,97 @@ void test_flash_writes_are_rate_limited() {
   TEST_ASSERT_TRUE(evlog_ring_flush_due(&r, 0xFFFFFFF0u) || !r.dirty); // the clock's wrap does not stop it
 }
 
+static void flood(evlog_ring_t *ring, int n) {
+  char text[64];
+  for (int i = 0; i < n; i++) {
+    snprintf(text, sizeof(text), "HID i2 #%d: 02 a0 b5 23 3f 20 00 00 e5 00 00 00", i);
+    evlog_ring_add(ring, 20000 + (uint32_t)i, 0, text);
+  }
+}
+
+// Owner's X 2026-11-03: tablet reconnects (25 lines each) pushed boot #458's crash line out within minutes
+void test_kept_records_survive_a_flood_and_a_restart() {
+  evlog_ring_new_boot(&r); // 1: crashed
+  evlog_ring_add(&r, 100, 0, "Apps: trmnl-sketch started");
+  evlog_ring_add_kept(&r, 1, 100, 0, "crash: StoreProhibited at app+0x1234, app trmnl-sketch entry 0x42000000");
+  evlog_ring_new_boot(&r); // 2
+  evlog_ring_add_kept(&r, 2, 5, 0, "boot: crash (panic) (4)");
+  TEST_ASSERT_EQUAL(3, evlog_ring_count(&r)); // still in the ring: shown once
+  flood(&r, 3000);
+  TEST_ASSERT_EQUAL_STRING("#1 0.100s - crash: StoreProhibited at app+0x1234, app trmnl-sketch entry 0x42000000",
+                           at(&r, 0));
+  TEST_ASSERT_EQUAL_STRING("#2 0.005s - boot: crash (panic) (4)", at(&r, 1));
+  TEST_ASSERT_EQUAL_STRING("#2 22.999s - HID i2 #2999: 02 a0 b5 23 3f 20 00 00 e5 00 00 00",
+                           at(&r, evlog_ring_count(&r) - 1));
+  TEST_ASSERT_EQUAL(EVLOG_BYTES, evlog_ring_save(&r, img, sizeof(img)));
+  evlog_ring_t after;
+  evlog_ring_init(&after, data2);
+  TEST_ASSERT_TRUE(evlog_ring_load(&after, img, sizeof(img)));
+  TEST_ASSERT_EQUAL(evlog_ring_count(&r), evlog_ring_count(&after));
+  TEST_ASSERT_EQUAL_STRING("#2 0.005s - boot: crash (panic) (4)", at(&after, 1));
+}
+
+void test_only_the_newest_kept_records_stay() {
+  char text[32];
+  for (int b = 1; b <= EVLOG_KEEP + 3; b++) {
+    evlog_ring_new_boot(&r);
+    snprintf(text, sizeof(text), "boot: software restart %d", b);
+    evlog_ring_add_kept(&r, (uint16_t)b, 10, 0, text);
+    flood(&r, 400);
+  }
+  TEST_ASSERT_EQUAL_STRING("#4 0.010s - boot: software restart 4", at(&r, 0));
+  TEST_ASSERT_EQUAL_STRING("#11 0.010s - boot: software restart 11", at(&r, EVLOG_KEEP - 1));
+  evlog_ring_clear(&r); // clear: none kept either
+  TEST_ASSERT_EQUAL(0, evlog_ring_count(&r));
+}
+
+// A damaged kept slot: the whole image is refused, as for a bad record
+void test_a_bad_kept_slot_loads_as_an_empty_log() {
+  evlog_ring_add_kept(&r, 0, 1, 0, "boot: power on (1)");
+  evlog_ring_save(&r, img, sizeof(img));
+  img[sizeof(evlog_hdr_t) + 11] = EVLOG_TEXT_MAX + 1;
+  reseal(img);
+  evlog_ring_t after;
+  evlog_ring_init(&after, data2);
+  TEST_ASSERT_FALSE(evlog_ring_load(&after, img, sizeof(img)));
+}
+
+// An "ELG1" file of the firmware before the kept slots: its records load, its reset and crash lines become kept
+void test_a_version_1_file_still_loads() {
+  const uint32_t cap = EVLOG_BYTES - 28;
+  memset(img, 0, sizeof(img));
+  const char *texts[] = {"boot: crash (panic) (4)", "Pen 28bd:0905 gone", "Sleep: 900 s"};
+  uint32_t off = 0, last = 0;
+  for (int i = 0; i < 3; i++) {
+    uint8_t len = (uint8_t)strlen(texts[i]);
+    uint8_t *p = img + 28 + off;
+    uint32_t ms = 1000u * (uint32_t)(i + 1);
+    p[0] = (uint8_t)ms;
+    p[1] = (uint8_t)(ms >> 8);
+    p[8] = 7; // boot 7
+    p[10] = 1;
+    p[11] = len;
+    memcpy(p + EVLOG_REC_HEAD, texts[i], len);
+    last = off;
+    off += EVLOG_REC_HEAD + len;
+  }
+  uint32_t h[7] = {EVLOG_MAGIC_V1, cap, 0, off, last, 7, 0};
+  h[6] = trmnl_crc32(trmnl_crc32(0, h, sizeof(h)), img + 28, cap);
+  memcpy(img, h, sizeof(h));
+  evlog_ring_t after;
+  evlog_ring_init(&after, data2);
+  TEST_ASSERT_TRUE(evlog_ring_load(&after, img, sizeof(img)));
+  TEST_ASSERT_EQUAL(3, evlog_ring_count(&after));
+  TEST_ASSERT_EQUAL_STRING("#7 1.000s - boot: crash (panic) (4)", at(&after, 0));
+  TEST_ASSERT_EQUAL_STRING("#7 3.000s - Sleep: 900 s", at(&after, 2));
+  TEST_ASSERT_TRUE(after.dirty); // written back in the new version
+  evlog_ring_new_boot(&after);
+  flood(&after, 3000);
+  TEST_ASSERT_EQUAL_STRING("#7 1.000s - boot: crash (panic) (4)", at(&after, 0)); // kept from the old file
+  img[100] ^= 1; // a damaged old file: empty, as before
+  TEST_ASSERT_FALSE(evlog_ring_load(&after, img, sizeof(img)));
+}
+
 int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
@@ -208,5 +299,9 @@ int main(int argc, char **argv) {
   RUN_TEST(test_an_earlier_boots_event_keeps_its_boot);
   RUN_TEST(test_clear_keeps_the_boot);
   RUN_TEST(test_flash_writes_are_rate_limited);
+  RUN_TEST(test_kept_records_survive_a_flood_and_a_restart);
+  RUN_TEST(test_only_the_newest_kept_records_stay);
+  RUN_TEST(test_a_bad_kept_slot_loads_as_an_empty_log);
+  RUN_TEST(test_a_version_1_file_still_loads);
   return UNITY_END();
 }

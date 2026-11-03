@@ -41,7 +41,7 @@ KEYS = [
     ("usb_keyboard", "probe_ms", "USB_PORT_PROBE_MS", "int", (500, 60000)),
     ("usb_keyboard", "retry_ms", "USB_PORT_RETRY_MS", "int", (1000, 600000)),
     ("usb_keyboard", "outside_probe_ms", "USB_PORT_OUTSIDE_PROBE_MS", "int", (1000, 60000)),
-    ("event_log", "bytes", "EVLOG_BYTES", "int", (1024, 65536)),
+    ("event_log", "bytes", "EVLOG_BYTES", "int", (2048, 65536)),  # kept slots + 4 records (evlog_ring.cpp)
     ("event_log", "flush_gap_ms", "EVLOG_FLUSH_GAP_MS", "int", (1000, 600000)),
 ]
 

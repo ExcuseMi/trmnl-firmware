@@ -107,6 +107,17 @@ static void flusher(void *arg) {
   }
 }
 
+static void add(bool kept, const char *fmt, va_list ap);
+
+// A line that ordinary lines never push out (evlog_ring_add_kept): the reset reason
+static void add_kept(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void add_kept(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  add(true, fmt, ap);
+  va_end(ap);
+}
+
 void evlog_begin(void) {
   if (mu) return;
   uint8_t *data = alloc(EVLOG_DATA_BYTES);
@@ -135,7 +146,7 @@ void evlog_begin(void) {
     last_ms = pending[i].ms;
   }
   if (crash[0]) {
-    evlog_ring_add_boot(&ring, pboot ? pboot : (uint16_t)ring.h.boot, last_ms, 0, crash);
+    evlog_ring_add_kept(&ring, pboot ? pboot : (uint16_t)ring.h.boot, last_ms, 0, crash); // never pushed out
     Log_error("Event log: %s", crash);
   }
   if (pboot && (uint16_t)(pboot - (uint16_t)ring.h.boot) < 0x8000u) ring.h.boot = pboot; // a boot that wrote nothing
@@ -143,7 +154,7 @@ void evlog_begin(void) {
   evlog_crash_set_boot((uint16_t)ring.h.boot);
   wmu = w;
   mu = m;
-  if (why != ESP_RST_DEEPSLEEP) evlog_add("boot: %s (%d)", reset_str(why), (int)why); // not one line per wake
+  if (why != ESP_RST_DEEPSLEEP) add_kept("boot: %s (%d)", reset_str(why), (int)why); // not one line per wake
   if (n && !loaded) evlog_add("event log: the saved log was damaged and dropped");
   heap_caps_register_failed_alloc_callback(on_alloc_failed);
   evlog_crash_begin();
@@ -153,20 +164,25 @@ void evlog_begin(void) {
   Log_info("Event log: %d events, boot #%u", evlog_ring_count(&ring), (unsigned)(uint16_t)ring.h.boot);
 }
 
-void evlog_add(const char *fmt, ...) {
+static void add(bool kept, const char *fmt, va_list ap) {
   if (!mu) return;
   char text[EVLOG_TEXT_MAX + 1];
-  va_list ap;
-  va_start(ap, fmt);
   vsnprintf(text, sizeof(text), fmt, ap);
-  va_end(ap);
   uint32_t ms = millis();
   int64_t wall = (int64_t)time(nullptr);
   xSemaphoreTake(mu, portMAX_DELAY);
-  evlog_ring_add(&ring, ms, wall, text);
+  if (kept) evlog_ring_add_kept(&ring, (uint16_t)ring.h.boot, ms, wall, text);
+  else evlog_ring_add(&ring, ms, wall, text);
   evlog_crash_pending((uint16_t)ring.h.boot, ms, wall > 0 && wall <= 0xFFFFFFFFll ? (uint32_t)wall : 0u, text);
   xSemaphoreGive(mu);
   if (task) xTaskNotifyGive(task);
+}
+
+void evlog_add(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  add(false, fmt, ap);
+  va_end(ap);
 }
 
 void evlog_flush(bool last) {
