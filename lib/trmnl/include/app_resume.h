@@ -25,6 +25,16 @@ typedef enum {
   APP_RESET_CRASH,      // panic or a watchdog
 } app_reset_t;
 
+// ESP-IDF's esp_reset_reason_t values (esp_system.h; src/app_runner.cpp checks them against the framework)
+#define APP_RST_PANIC 4
+#define APP_RST_INT_WDT 5
+#define APP_RST_TASK_WDT 6 // the task watchdog (task_watch.h): a task that stopped feeding
+#define APP_RST_WDT 7
+#define APP_RST_DEEPSLEEP 8
+
+// How the X came up, from esp_reset_reason(): the event log and the resume use the same (a watchdog is a crash)
+app_reset_t app_reset_of(int esp_reset_reason);
+
 // The app to resume, if one is due: copies its path to `path` (also for APP_RESUME_NO_INPUT, to name it) and clears
 // the flag (a crash before app_resume_started() then ends the resuming). Any `reset` but APP_RESET_SLEEP_WAKE: nothing
 // is resumed and the flag is cleared.

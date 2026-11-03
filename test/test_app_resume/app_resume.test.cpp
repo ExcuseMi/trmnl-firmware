@@ -46,6 +46,22 @@ void test_a_panic_or_watchdog_reset_ends_the_resuming() {
   TEST_ASSERT_EQUAL(APP_RESUME_NONE, app_resume_take(p, APP_RESET_SLEEP_WAKE, path, sizeof(path)));
 }
 
+// The task watchdog's restart (task_watch.h) counts as a crash: the app that hung is not reopened into the same hang
+void test_a_task_watchdog_reset_is_a_crash() {
+  TEST_ASSERT_EQUAL(APP_RESET_CRASH, app_reset_of(APP_RST_TASK_WDT));
+  TEST_ASSERT_EQUAL(APP_RESET_CRASH, app_reset_of(APP_RST_INT_WDT));
+  TEST_ASSERT_EQUAL(APP_RESET_CRASH, app_reset_of(APP_RST_WDT));
+  TEST_ASSERT_EQUAL(APP_RESET_CRASH, app_reset_of(APP_RST_PANIC));
+  TEST_ASSERT_EQUAL(APP_RESET_SLEEP_WAKE, app_reset_of(APP_RST_DEEPSLEEP));
+  TEST_ASSERT_EQUAL(APP_RESET_RESTART, app_reset_of(1)); // power on
+  TEST_ASSERT_EQUAL(APP_RESET_RESTART, app_reset_of(3)); // esp_restart
+  MemoryPersistence p;
+  app_resume_starting(p, "/apps/trmnl-sketch.elf");
+  app_resume_input(p);
+  app_resume_started(p);
+  TEST_ASSERT_EQUAL(APP_RESUME_NONE, app_resume_take(p, app_reset_of(APP_RST_TASK_WDT), path, sizeof(path)));
+}
+
 // Owner 2026-11-02: a restart (power-on, esptool, watchdog reset) goes home; only a sleep wake resumes
 void test_a_restart_goes_home_and_clears_the_resume() {
   MemoryPersistence p;
@@ -124,6 +140,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_a_crash_while_starting_ends_the_resuming);
   RUN_TEST(test_an_app_that_never_started_is_not_resumed);
   RUN_TEST(test_a_panic_or_watchdog_reset_ends_the_resuming);
+  RUN_TEST(test_a_task_watchdog_reset_is_a_crash);
   RUN_TEST(test_a_restart_goes_home_and_clears_the_resume);
   RUN_TEST(test_a_wake_never_brings_back_an_app_that_was_not_running_at_sleep);
   RUN_TEST(test_an_ended_app_is_not_resumed);

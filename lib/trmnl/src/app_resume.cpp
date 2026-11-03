@@ -2,6 +2,11 @@
 
 #include <string.h>
 
+app_reset_t app_reset_of(int r) {
+  if (r == APP_RST_PANIC || r == APP_RST_INT_WDT || r == APP_RST_TASK_WDT || r == APP_RST_WDT) return APP_RESET_CRASH;
+  return r == APP_RST_DEEPSLEEP ? APP_RESET_SLEEP_WAKE : APP_RESET_RESTART;
+}
+
 app_resume_t app_resume_take(Persistence &p, app_reset_t reset, char *path, size_t path_len) {
   if (!p.readBool(APP_RESUME_FLAG_KEY, false)) return APP_RESUME_NONE;
   p.writeBool(APP_RESUME_FLAG_KEY, false);
